@@ -1,4 +1,6 @@
 (() => {
+  try {
+    return (() => {
   "use strict";
   const { metro, patcher, plugin, ui } = vendetta;
   const vstorage = vendetta.storage;
@@ -891,7 +893,7 @@
         Section("Status"),
         h(RN.View, { key: "status", style: { paddingHorizontal: 16, paddingVertical: 8 } },
           Text({ style: { color: C.sub, fontSize: 12 }, selectable: true },
-            "Chat bar button: " + status.button + "\nChat box: " + status.input + "\nSend hook: " + status.send + "\nIcon: " + (status.icon || "not drawn yet"))),
+            "Chat bar button: " + status.button + "\nChat box: " + status.input + "\nSend hook: " + status.send + "\nIcon: " + (status.icon || "not drawn yet") + "\nErrors: " + (errors.join("; ") || "none"))),
         Btn("refresh", "Refresh status", refreshUI),
         Btn("icons", "Scan icons", () => { status.icons = scanIcons(); refreshUI(); }),
         Btn("icons2", "Advanced icon scan", () => { status.icons = scanIconsDeep(); refreshUI(); }),
@@ -909,6 +911,11 @@
     return h(RN.ScrollView, null, ...content);
   }
 
+  const errors = [];
+  const step = (name, fn) => {
+    try { fn(); } catch (e) { errors.push(name + ": " + (e && e.message ? e.message : String(e))); }
+  };
+
   function onLoad() {
     const s = cfg();
     const defaults = {
@@ -917,17 +924,17 @@
     };
     for (const k of Object.keys(defaults)) if (s[k] === undefined) s[k] = defaults[k];
     renderErrors = 0;
-    if (!loadStores()) { toast("Quick Translate: required Discord modules not found"); return; }
-
-    try { renderUnpatch = patchRender(); } catch (_) {}
-    try {
+    errors.length = 0;
+    step("stores", () => { if (!loadStores()) errors.push("stores: some Discord stores were not found"); });
+    step("renderer", () => { renderUnpatch = patchRender(); });
+    step("actionSheet", () => {
       ActionSheet = findByProps("openLazy", "hideActionSheet");
       if (ActionSheet) unpatches.push(patcher.before("openLazy", ActionSheet, hookSheet));
-    } catch (_) {}
-    try { installInputCapture(); } catch (_) {}
-    try { installSendHook(); } catch (_) {}
-    try { attachButton(); } catch (_) {}
-    try { hideChatButtons(); } catch (_) {}
+    });
+    step("inputCapture", installInputCapture);
+    step("sendHook", installSendHook);
+    step("chatButton", attachButton);
+    step("hideButtons", hideChatButtons);
   }
 
   function onUnload() {
@@ -943,4 +950,14 @@
   }
 
   return { onLoad, onUnload, settings: Settings };
+})();
+  } catch (e) {
+    const msg = (e && e.stack) ? String(e.stack).slice(0, 900) : String(e);
+    return {
+      onLoad() { try { vendetta.ui.toasts.showToast("Quick Translate failed to start"); } catch (_) {} },
+      onUnload() {},
+      settings: () => vendetta.metro.common.React.createElement(vendetta.metro.common.ReactNative.Text,
+        { selectable: true, style: { padding: 16, color: "#FFFFFF" } }, "Quick Translate failed to start:\n\n" + msg),
+    };
+  }
 })()
