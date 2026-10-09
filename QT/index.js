@@ -420,6 +420,24 @@
     return iconCache;
   }
 
+  function scanIconsDeep() {
+    const keys = new Set();
+    safe(() => metro.find((m) => {
+      try {
+        const objs = [m, m && m.default];
+        for (const o of objs) {
+          if (!o || (typeof o !== "object" && typeof o !== "function")) continue;
+          for (const k of Object.keys(o)) if (/ranslat|locale|language|globe/i.test(k)) keys.add(k);
+        }
+      } catch (_) {}
+      return false;
+    }), null);
+    const list = Array.from(keys).sort();
+    const pick = list.find((k) => /^Translate\w*Icon$/.test(k)) || list.find((k) => /^(Language|Locale)\w*Icon$/.test(k));
+    if (pick) { try { cfg().iconKey = pick; iconCache = undefined; } catch (_) {} }
+    return (pick ? "Using: " + pick + "\n" : "") + (list.slice(0, 60).join("\n") || "none found");
+  }
+
   function scanIcons() {
     return safe(() => Object.keys(ui.assets.all || {}).filter((n) => /translat|locale|language|globe/i.test(n)).sort().join("\n"), "") || "none found";
   }
@@ -551,8 +569,9 @@
     const id = (typeof saved === "number" ? saved : null) || translateAssetId();
     if (id) { status.icon = "asset " + id; return React.createElement(RN.Image, { source: id, style: { width: 24, height: 24, tintColor: C.text } }); }
     if (capturedIcon && React.isValidElement(capturedIcon)) { status.icon = "copied from Discord menu"; return capturedIcon; }
-    const comp = safe(() => (findByProps("TranslateIcon") || {}).TranslateIcon, null);
-    if (comp) { try { const el = React.createElement(comp, { size: "md" }); status.icon = "TranslateIcon component"; return el; } catch (_) {} }
+    const key = cfg().iconKey || "TranslateIcon";
+    const comp = safe(() => (findByProps(key) || {})[key], null);
+    if (comp) { try { const el = React.createElement(comp, { size: "md" }); status.icon = key + " component"; return el; } catch (_) {} }
     status.icon = "emoji fallback (long-press a message to copy Discord's icon)";
     return React.createElement(RN.Text, { style: { fontSize: 20, textAlign: "center" } }, "\uD83C\uDF10");
   }
@@ -652,49 +671,54 @@
         : null);
   }
 
-  const HIDDEN_BUTTONS = new Set(["ChatInputActionButtonApps", "ChatInputActionButtonGiftOrThread", "ChatInputActionButtonGift"]);
+  const ANCHORS = [
+    { id: "gift", label: "Replace the Gift button", name: "ChatInputActionButtonGiftOrThread", mode: "replace" },
+    { id: "apps", label: "Replace the Apps button", name: "ChatInputActionButtonApps", mode: "replace" },
+    { id: "send", label: "Next to the Send button", name: "ChatInputSendButton", mode: "beside" },
+    { id: "actions", label: "Next to the + button", name: "ChatInputActions", mode: "append" },
+  ];
+  const currentAnchor = () => ANCHORS.find((a) => a.id === cfg().anchor) || ANCHORS[0];
+  const hiddenNames = () => {
+    const keep = currentAnchor().name;
+    return ["ChatInputActionButtonApps", "ChatInputActionButtonGiftOrThread", "ChatInputActionButtonGift"].filter((n) => n !== keep);
+  };
 
-  function holdsHidden(node, depth) {
+  function resolveTarget(name) {
+    const mod = findComponentModule(name);
+    if (!mod) return null;
+    const comp = mod.default && nameOfComponent(mod.default) === name ? mod.default : mod;
+    return typeof comp === "function" ? (mod.default === comp ? [mod, "default"] : null) : patchTarget(comp);
+  }
+
+  function holdsHidden(node, depth, names) {
     if (!node || typeof node !== "object" || depth > 5) return false;
-    if (Array.isArray(node)) return node.some((c) => holdsHidden(c, depth + 1));
+    if (Array.isArray(node)) return node.some((c) => holdsHidden(c, depth + 1, names));
     if (!node.$$typeof) return false;
-    if (HIDDEN_BUTTONS.has(nameOfComponent(node.type))) return true;
+    if (names.indexOf(nameOfComponent(node.type)) !== -1) return true;
     const p = node.props;
     if (!p) return false;
     return Object.keys(p).some((k) => {
       const v = p[k];
-      return !!v && typeof v === "object" && holdsHidden(v, depth + 1);
+      return !!v && typeof v === "object" && holdsHidden(v, depth + 1, names);
     });
   }
 
   function hideChatButtons() {
+    const names = hiddenNames();
     try {
-      const slot = "ChatInputActionButtonTransitionItem";
-      const mod = findComponentModule(slot);
-      if (mod) {
-        const comp = mod.default && nameOfComponent(mod.default) === slot ? mod.default : mod;
-        const target = typeof comp === "function"
-          ? (mod.default === comp ? [mod, "default"] : null)
-          : patchTarget(comp);
-        if (target) {
-          unpatches.push(patcher.instead(target[1], target[0], (args, orig) => {
-            const props = args[0];
-            if (cfg().hideExtras !== false && props && typeof props === "object" &&
-                Object.keys(props).some((k) => holdsHidden(props[k], 0))) return null;
-            return orig(...args);
-          }));
-        }
+      const target = resolveTarget("ChatInputActionButtonTransitionItem");
+      if (target) {
+        unpatches.push(patcher.instead(target[1], target[0], (args, orig) => {
+          const props = args[0];
+          if (cfg().hideExtras !== false && props && typeof props === "object" &&
+              Object.keys(props).some((k) => holdsHidden(props[k], 0, hiddenNames()))) return null;
+          return orig(...args);
+        }));
       }
     } catch (_) {}
-    const names = ["ChatInputActionButtonApps", "ChatInputActionButtonGiftOrThread", "ChatInputActionButtonGift"];
     for (const name of names) {
       try {
-        const mod = findComponentModule(name);
-        if (!mod) continue;
-        const comp = mod.default && nameOfComponent(mod.default) === name ? mod.default : mod;
-        const target = typeof comp === "function"
-          ? (mod.default === comp ? [mod, "default"] : null)
-          : patchTarget(comp);
+        const target = resolveTarget(name);
         if (!target) continue;
         unpatches.push(patcher.instead(target[1], target[0], (args, orig) => (cfg().hideExtras === false ? orig(...args) : null)));
       } catch (_) {}
@@ -714,29 +738,22 @@
   }
 
   function attachButton() {
-    const names = ["ChatInputSendButton", "ChatInputActionButtonGiftOrThread", "ChatInputActionButtonGift"];
-    for (const name of names) {
-      const mod = findComponentModule(name);
-      if (!mod) continue;
-      const comp = mod.default && nameOfComponent(mod.default) === name ? mod.default : mod;
-      const target = typeof comp === "function"
-        ? (mod.default === comp ? [mod, "default"] : null)
-        : patchTarget(comp);
-      if (!target) continue;
-      const beside = name === "ChatInputSendButton";
-      try {
+    const anchor = currentAnchor();
+    const target = resolveTarget(anchor.name);
+    if (!target) { status.button = anchor.name + " not found"; return; }
+    const make = () => React.createElement(TranslateButton, { key: "qt-button" });
+    try {
+      if (anchor.mode === "replace") {
+        unpatches.push(patcher.instead(target[1], target[0], (args, orig) => (cfg().showButton === false ? orig(...args) : make())));
+      } else {
         unpatches.push(patcher.after(target[1], target[0], (args, ret) => {
-          if (cfg().showButton === false) return undefined;
-          if (beside && !ret) return undefined;
-          const btn = React.createElement(TranslateButton, { key: "qt-button" });
-          if (beside) return React.createElement(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, btn, ret);
-          return React.createElement(React.Fragment, null, btn, ret);
+          if (cfg().showButton === false || !ret) return undefined;
+          if (anchor.mode === "beside") return React.createElement(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, make(), ret);
+          return React.createElement(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, ret, make());
         }));
-        status.button = "attached to " + name + ", waiting for the chat bar";
-        return;
-      } catch (_) {}
-    }
-    status.button = "chat bar component not found";
+      }
+      status.button = "attached to " + anchor.name + ", waiting for the chat bar";
+    } catch (_) { status.button = "could not attach to " + anchor.name; }
   }
 
   // ---------- settings ----------
@@ -826,6 +843,11 @@
         Section("Chat bar"),
         Switch("showButton", "Translate button", "Tap to translate what you typed. Long-press for one-time options"),
         Switch("translateOnSend", "Translate on send", "Translate every message right before it is sent"),
+        PressRow("anchor", "Button position", "Tap to change, then restart Discord", () => {
+          const i = ANCHORS.findIndex((x) => x.id === currentAnchor().id);
+          cfg().anchor = ANCHORS[(i + 1) % ANCHORS.length].id;
+          refreshUI();
+        }, currentAnchor().label),
         Switch("hideExtras", "Hide Gift and Apps buttons", "Removes them from the chat bar. Restart Discord to apply"),
         Btn("test", "Test translation", () => {
           translate("Hello, how are you?", cfg().targetIn || "en", "auto", false).then((r) => {
@@ -838,6 +860,7 @@
             "Chat bar button: " + status.button + "\nChat box: " + status.input + "\nSend hook: " + status.send + "\nIcon: " + (status.icon || "not drawn yet"))),
         Btn("refresh", "Refresh status", refreshUI),
         Btn("icons", "Scan icons", () => { status.icons = scanIcons(); refreshUI(); }),
+        Btn("icons2", "Advanced icon scan", () => { status.icons = scanIconsDeep(); refreshUI(); }),
         status.icons
           ? h(RN.View, { key: "icons-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
               Text({ style: { color: C.sub, fontSize: 12 }, selectable: true }, status.icons))
@@ -856,7 +879,7 @@
     const s = cfg();
     const defaults = {
       targetOut: "en", targetIn: "en", sourceOut: "auto", immersive: true, showButton: true,
-      translateOnSend: false, hideExtras: true, favLangs: ["en", "es", "fr", "de", "ro", "ru"],
+      translateOnSend: false, hideExtras: true, anchor: "gift", favLangs: ["en", "es", "fr", "de", "ro", "ru"],
     };
     for (const k of Object.keys(defaults)) if (s[k] === undefined) s[k] = defaults[k];
     renderErrors = 0;
