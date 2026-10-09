@@ -36,4 +36,11 @@ Please report bugs, crashes, and suggestions in the project's feedback channel.
 
 ## Screenshots:
 
+<img width="1179" height="2403" alt="IMG_0597" src="https://github.com/user-attachments/assets/b9843ec8-32fa-4389-805a-6916027c686c" />
+<img width="1179" height="1406" alt="IMG_0595" src="https://github.com/user-attachments/assets/da58c464-dfef-4b11-a6f2-ec7056a9505d" />
+<img width="1179" height="2401" alt="IMG_0594" src="https://github.com/user-attachments/assets/b1811dad-907f-4d34-8872-8d4fa26621bf" />
+<img width="1179" height="2416" alt="IMG_0593" src="https://github.com/user-attachments/assets/44a19bd0-90ef-4604-9f4e-abbcdc8a36b1" />
+<img width="1179" height="505" alt="IMG_0592" src="https://github.com/user-attachments/assets/cf5a5697-783b-4d97-be7a-7b3ddfc45eb3" />
+<img width="1179" height="284" alt="IMG_0596" src="https://github.com/user-attachments/assets/ac0efa5e-4831-4c73-be29-c2c8307bfd48" />
+<img width="1179" height="245" alt="IMG_0599" src="https://github.com/user-attachments/assets/0397bff6-bff8-4305-8591-be66019ec1e9" />
 
