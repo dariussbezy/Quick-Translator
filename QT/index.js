@@ -116,36 +116,39 @@
       .replace(/&quot;/g, "\"").replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   }
 
-  async function callApi(text, tl, sl) {
+  function callApi(text, tl, sl) {
     const key = String(cfg().apiKey || "").trim();
     if (key) {
       const body = { q: text, target: tl, format: "text" };
       if (sl && sl !== "auto") body.source = sl;
-      const res = await fetchT("https://translation.googleapis.com/language/translate/v2?key=" + encodeURIComponent(key), {
+      return fetchT("https://translation.googleapis.com/language/translate/v2?key=" + encodeURIComponent(key), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error((json && json.error && json.error.message) || "HTTP " + res.status);
-      const t = json.data.translations[0];
-      return { text: decodeEntities(t.translatedText), src: t.detectedSourceLanguage || sl };
+      }).then((res) => res.json().then((json) => {
+        if (!res.ok) throw new Error((json && json.error && json.error.message) || "HTTP " + res.status);
+        const t = json.data.translations[0];
+        return { text: decodeEntities(t.translatedText), src: t.detectedSourceLanguage || sl };
+      }));
     }
     const params = "client=gtx&dt=t&sl=" + encodeURIComponent(sl || "auto") + "&tl=" + encodeURIComponent(tl);
     const base = "https://translate.googleapis.com/translate_a/single?" + params;
-    const res = text.length < 1200
-      ? await fetchT(base + "&q=" + encodeURIComponent(text))
-      : await fetchT(base, {
+    const req = text.length < 1200
+      ? fetchT(base + "&q=" + encodeURIComponent(text))
+      : fetchT(base, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
           body: "q=" + encodeURIComponent(text),
         });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const json = await res.json();
-    const segments = Array.isArray(json) && Array.isArray(json[0]) ? json[0] : [];
-    const out = segments.map((s) => (s && s[0]) || "").join("");
-    if (!out && text.trim()) throw new Error("Empty response");
-    return { text: out, src: (Array.isArray(json) && typeof json[2] === "string" && json[2]) || sl };
+    return req.then((res) => {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }).then((json) => {
+      const segments = Array.isArray(json) && Array.isArray(json[0]) ? json[0] : [];
+      const out = segments.map((s) => (s && s[0]) || "").join("");
+      if (!out && text.trim()) throw new Error("Empty response");
+      return { text: out, src: (Array.isArray(json) && typeof json[2] === "string" && json[2]) || sl };
+    });
   }
 
   function prettyToken(t) {
@@ -179,21 +182,22 @@
     return out;
   }
 
-  async function translate(text, tl, sl, pretty) {
+  function translate(text, tl, sl, pretty) {
     const source = sl || "auto";
     const cacheKey = (pretty ? "p|" : "r|") + source + "|" + tl + "|" + text;
-    if (cache.has(cacheKey)) return cache.get(cacheKey);
+    if (cache.has(cacheKey)) return Promise.resolve(cache.get(cacheKey));
     const { out, tokens } = protect(text);
-    if (!out.replace(/§\d+§/g, "").trim()) return { same: true, text, src: source };
-    const res = await callApi(out, tl, source);
-    const base = String(tl).toLowerCase().split("-")[0];
-    const detected = String(res.src || "").toLowerCase().split("-")[0];
-    const result = detected && detected === base && source === "auto"
-      ? { same: true, text, src: res.src }
-      : { same: false, text: restore(res.text, tokens, pretty), src: res.src };
-    cache.set(cacheKey, result);
-    trimMap(cache, MAX_CACHE);
-    return result;
+    if (!out.replace(/§\d+§/g, "").trim()) return Promise.resolve({ same: true, text, src: source });
+    return callApi(out, tl, source).then((res) => {
+      const base = String(tl).toLowerCase().split("-")[0];
+      const detected = String(res.src || "").toLowerCase().split("-")[0];
+      const result = detected && detected === base && source === "auto"
+        ? { same: true, text, src: res.src }
+        : { same: false, text: restore(res.text, tokens, pretty), src: res.src };
+      cache.set(cacheKey, result);
+      trimMap(cache, MAX_CACHE);
+      return result;
+    });
   }
 
   // ---------- chat input bridge ----------
@@ -255,27 +259,26 @@
     return ok;
   }
 
-  async function translateInput(opts) {
+  function translateInput(opts) {
     const tl = opts.tl;
     const sl = opts.sl || "auto";
     const canWrite = !!(bridge.change || bridge.inst) && Date.now() - bridge.seen < 600000;
     if (!canWrite) {
       armed = { tl, sl };
       toast("Could not read the chat box. Your next message will be translated to " + langName(tl) + " when you send it");
-      return;
+      return Promise.resolve();
     }
     const text = readInput();
-    if (!text || !text.trim()) { toast("Type a message first"); return; }
-    try {
-      const r = await translate(text, tl, sl, false);
+    if (!text || !text.trim()) { toast("Type a message first"); return Promise.resolve(); }
+    return translate(text, tl, sl, false).then((r) => {
       if (r.same) { toast("Already in " + langName(tl)); return; }
       lastOriginal = text;
       if (!writeInput(r.text)) {
         ask("Translation (" + langName(tl) + ")", r.text, [{ text: "Copy", onPress: () => copyText(r.text) }]);
       }
-    } catch (e) {
+    }).catch((e) => {
       toast("Translation failed: " + (e && e.message ? e.message : e));
-    }
+    });
   }
 
   function restoreOriginal() {
@@ -288,17 +291,20 @@
     try {
       MessageActions = findByProps("sendMessage", "receiveMessage");
       if (!MessageActions) { status.send = "send function not found"; return; }
-      unpatches.push(patcher.instead("sendMessage", MessageActions, async (args, orig) => {
+      unpatches.push(patcher.instead("sendMessage", MessageActions, (args, orig) => {
+        let pending = null;
         try {
           const msg = args[1];
           const job = armed;
           if ((job || cfg().translateOnSend) && msg && typeof msg.content === "string" && msg.content.trim()) {
             armed = null;
-            const r = await translate(msg.content, job ? job.tl : cfg().targetOut, job ? job.sl : cfg().sourceOut, false);
-            if (!r.same) args[1] = Object.assign({}, msg, { content: r.text });
+            pending = translate(msg.content, job ? job.tl : cfg().targetOut, job ? job.sl : cfg().sourceOut, false).then((r) => {
+              if (!r.same) args[1] = Object.assign({}, msg, { content: r.text });
+            });
           }
         } catch (_) { toast("Translation failed, sent the original message"); }
-        return orig(...args);
+        if (!pending) return orig(...args);
+        return pending.catch(() => { toast("Translation failed, sent the original message"); }).then(() => orig(...args));
       }));
       status.send = "hooked";
     } catch (_) { status.send = "could not hook"; }
@@ -320,20 +326,19 @@
     }, 0);
   }
 
-  async function translateMessage(message, tl) {
+  function translateMessage(message, tl) {
     const text = message && message.content;
-    if (typeof text !== "string" || !text.trim()) { toast("This message has no text"); return; }
+    if (typeof text !== "string" || !text.trim()) { toast("This message has no text"); return Promise.resolve(); }
     const channelId = message.channel_id || message.channelId || currentChannelId();
     toast("Translating...");
-    try {
-      const r = await translate(text, tl, "auto", true);
+    return translate(text, tl, "auto", true).then((r) => {
       if (r.same) { toast("Already in " + langName(tl)); return; }
       translations.set(message.id, { text: r.text, src: r.src, tl, at: Date.now() });
       trimMap(translations, MAX_TRANSLATIONS);
       refreshRow(channelId, message.id);
-    } catch (e) {
+    }).catch((e) => {
       toast("Translation failed: " + (e && e.message ? e.message : e));
-    }
+    });
   }
 
   function showOriginal(message) {
@@ -553,10 +558,12 @@
     if (cfg().showButton === false) return null;
     const C = palette();
 
-    const run = async (tl, sl) => {
+    const run = (tl, sl) => {
       if (busy) return;
       setBusy(true);
-      try { await translateInput({ tl, sl }); } finally { setBusy(false); }
+      let p;
+      try { p = translateInput({ tl, sl }); } catch (_) { p = Promise.resolve(); }
+      return p.then(() => setBusy(false), () => setBusy(false));
     };
     const close = () => { setOpen(false); setView("main"); setQuery(""); };
     const openPanel = () => { setFrom(cfg().sourceOut || "auto"); setTo(cfg().targetOut || "en"); setView("main"); setOpen(true); };
@@ -747,11 +754,10 @@
             placeholder: "API key", placeholderTextColor: C.sub, secureTextEntry: true, autoCorrect: false, autoCapitalize: "none",
             style: { color: C.text, borderWidth: 1, borderColor: C.line, borderRadius: 8, padding: 10 },
           })),
-        Btn("test", "Test translation", async () => {
-          try {
-            const r = await translate("Hello, how are you?", cfg().targetIn || "en", "auto", false);
+        Btn("test", "Test translation", () => {
+          translate("Hello, how are you?", cfg().targetIn || "en", "auto", false).then((r) => {
             ask("Test translation", r.same ? "Same language, nothing to translate." : r.text + "\n\nDetected: " + langName(r.src), [{ text: "OK" }]);
-          } catch (e) { ask("Test failed", String(e && e.message ? e.message : e), [{ text: "OK" }]); }
+          }).catch((e) => { ask("Test failed", String(e && e.message ? e.message : e), [{ text: "OK" }]); });
         }),
         Section("Status"),
         h(RN.View, { key: "status", style: { paddingHorizontal: 16, paddingVertical: 8 } },
