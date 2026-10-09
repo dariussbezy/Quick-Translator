@@ -408,6 +408,7 @@
   }
 
   let iconCache;
+  let capturedIcon = null;
   function translateAssetId() {
     if (iconCache === undefined) {
       iconCache = safe(() => {
@@ -451,6 +452,11 @@
     for (const g of groups) {
       const hit = g.rows.find((r) => /translate/i.test(rowLabel(r) || ""));
       if (hit) { nativeIcon = hit.props.icon; break; }
+    }
+    if (nativeIcon !== undefined && nativeIcon !== null) {
+      capturedIcon = nativeIcon;
+      const src = safe(() => nativeIcon.props.source, null);
+      if (typeof src === "number") { try { cfg().iconSource = src; } catch (_) {} }
     }
     const elements = plan.map((item) => {
       const props = {
@@ -541,9 +547,13 @@
   }
 
   function translateIcon(C) {
-    const iconId = translateAssetId();
-    if (iconId) return React.createElement(RN.Image, { source: iconId, style: { width: 24, height: 24, tintColor: C.text } });
-    return React.createElement(RN.Text, { style: { color: C.text, fontSize: 15, fontWeight: "700" } }, "文A");
+    const saved = cfg().iconSource;
+    const id = (typeof saved === "number" ? saved : null) || translateAssetId();
+    if (id) return React.createElement(RN.Image, { source: id, style: { width: 24, height: 24, tintColor: C.text } });
+    if (capturedIcon && React.isValidElement(capturedIcon)) return capturedIcon;
+    const comp = safe(() => (findByProps("TranslateIcon") || {}).TranslateIcon, null);
+    if (comp) { try { return React.createElement(comp, { size: "md" }); } catch (_) {} }
+    return React.createElement(RN.Text, { style: { color: C.text, fontSize: 17, fontWeight: "700", textAlign: "center" } }, "\u6587A");
   }
 
   function TranslateButton(props) {
@@ -639,6 +649,22 @@
                 style: { backgroundColor: C.bg, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28 },
               }, ...panel)))
         : null);
+  }
+
+  function hideChatButtons() {
+    const names = ["ChatInputActionButtonApps", "ChatInputActionButtonGiftOrThread", "ChatInputActionButtonGift"];
+    for (const name of names) {
+      try {
+        const mod = findComponentModule(name);
+        if (!mod) continue;
+        const comp = mod.default && nameOfComponent(mod.default) === name ? mod.default : mod;
+        const target = typeof comp === "function"
+          ? (mod.default === comp ? [mod, "default"] : null)
+          : patchTarget(comp);
+        if (!target) continue;
+        unpatches.push(patcher.instead(target[1], target[0], (args, orig) => (cfg().hideExtras === false ? orig(...args) : null)));
+      } catch (_) {}
+    }
   }
 
   function scanChatComponents() {
@@ -766,6 +792,7 @@
         Section("Chat bar"),
         Switch("showButton", "Translate button", "Tap to translate what you typed. Long-press for one-time options"),
         Switch("translateOnSend", "Translate on send", "Translate every message right before it is sent"),
+        Switch("hideExtras", "Hide Gift and Apps buttons", "Removes them from the chat bar. Restart Discord to apply"),
         Btn("test", "Test translation", () => {
           translate("Hello, how are you?", cfg().targetIn || "en", "auto", false).then((r) => {
             ask("Test translation", r.same ? "Same language, nothing to translate." : r.text + "\n\nDetected: " + langName(r.src), [{ text: "OK" }]);
@@ -795,7 +822,7 @@
     const s = cfg();
     const defaults = {
       targetOut: "en", targetIn: "en", sourceOut: "auto", immersive: true, showButton: true,
-      translateOnSend: false, favLangs: ["en", "es", "fr", "de", "ro", "ru"],
+      translateOnSend: false, hideExtras: true, favLangs: ["en", "es", "fr", "de", "ro", "ru"],
     };
     for (const k of Object.keys(defaults)) if (s[k] === undefined) s[k] = defaults[k];
     renderErrors = 0;
@@ -809,6 +836,7 @@
     try { installInputCapture(); } catch (_) {}
     try { installSendHook(); } catch (_) {}
     try { attachButton(); } catch (_) {}
+    try { hideChatButtons(); } catch (_) {}
   }
 
   function onUnload() {
