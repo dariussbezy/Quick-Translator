@@ -564,15 +564,38 @@
     return null;
   }
 
-  function translateIcon(C) {
+  const ICON_MODES = ["auto", "component", "image", "emoji"];
+
+  function iconAsComponent() {
+    const keys = [cfg().iconKey, "LanguageIcon", "TranslateIcon"].filter(Boolean);
+    for (const key of keys) {
+      const comp = safe(() => (findByProps(key) || {})[key], null);
+      if (comp) {
+        try { const el = React.createElement(comp, { size: "md" }); status.icon = key + " component"; return el; } catch (_) {}
+      }
+    }
+    return null;
+  }
+
+  function iconAsImage(C) {
     const saved = cfg().iconSource;
     const id = (typeof saved === "number" ? saved : null) || translateAssetId();
-    if (id) { status.icon = "asset " + id; return React.createElement(RN.Image, { source: id, style: { width: 24, height: 24, tintColor: C.text } }); }
-    if (capturedIcon && React.isValidElement(capturedIcon)) { status.icon = "copied from Discord menu"; return capturedIcon; }
-    const key = cfg().iconKey || "TranslateIcon";
-    const comp = safe(() => (findByProps(key) || {})[key], null);
-    if (comp) { try { const el = React.createElement(comp, { size: "md" }); status.icon = key + " component"; return el; } catch (_) {} }
-    status.icon = "emoji fallback (long-press a message to copy Discord's icon)";
+    if (!id) return null;
+    status.icon = "image asset " + id;
+    return React.createElement(RN.Image, { source: id, style: { width: 24, height: 24, tintColor: C.text } });
+  }
+
+  function translateIcon(C) {
+    const mode = cfg().iconMode || "auto";
+    let el = null;
+    if (mode === "auto") {
+      el = iconAsComponent();
+      if (!el && capturedIcon && React.isValidElement(capturedIcon)) { status.icon = "copied from Discord menu"; el = capturedIcon; }
+      if (!el) el = iconAsImage(C);
+    } else if (mode === "component") el = iconAsComponent();
+    else if (mode === "image") el = iconAsImage(C);
+    if (el) return el;
+    status.icon = "emoji (" + mode + ")";
     return React.createElement(RN.Text, { style: { fontSize: 20, textAlign: "center" } }, "\uD83C\uDF10");
   }
 
@@ -725,6 +748,36 @@
     }
   }
 
+  const probes = {};
+  function installLayoutProbe() {
+    for (const name of ["ChatInputNativeComponent", "ChatInputActions", "ChatInput"]) {
+      try {
+        const target = resolveTarget(name);
+        if (!target) { probes[name] = "not patchable"; continue; }
+        unpatches.push(patcher.before(target[1], target[0], (args) => {
+          const now = Date.now();
+          const prev = probes[name];
+          if (prev && prev.at && now - prev.at < 1500) return;
+          const p = args[0];
+          if (!p || typeof p !== "object") return;
+          const parts = Object.keys(p).slice(0, 60).map((k) => {
+            const v = p[k];
+            const ty = typeof v;
+            return k + (ty === "number" || ty === "boolean" ? "=" + v : ty === "string" ? "=" + v.slice(0, 18) : ":" + ty);
+          });
+          probes[name] = { at: now, text: parts.join(", ") };
+        }));
+      } catch (_) { probes[name] = "error"; }
+    }
+  }
+
+  function layoutReport() {
+    return Object.keys(probes).map((n) => {
+      const p = probes[n];
+      return n + ": " + (typeof p === "string" ? p : p && p.text ? p.text : "not rendered yet");
+    }).join("\n\n") || "no data yet";
+  }
+
   function scanChatComponents() {
     const found = new Set();
     safe(() => metro.find((m) => {
@@ -843,6 +896,11 @@
         Section("Chat bar"),
         Switch("showButton", "Translate button", "Tap to translate what you typed. Long-press for one-time options"),
         Switch("translateOnSend", "Translate on send", "Translate every message right before it is sent"),
+        PressRow("iconMode", "Icon style", "Tap to change if the icon looks wrong", () => {
+          const i = ICON_MODES.indexOf(cfg().iconMode || "auto");
+          cfg().iconMode = ICON_MODES[(i + 1) % ICON_MODES.length];
+          refreshUI();
+        }, cfg().iconMode || "auto"),
         PressRow("anchor", "Button position", "Tap to change, then restart Discord", () => {
           const i = ANCHORS.findIndex((x) => x.id === currentAnchor().id);
           cfg().anchor = ANCHORS[(i + 1) % ANCHORS.length].id;
@@ -864,6 +922,11 @@
         status.icons
           ? h(RN.View, { key: "icons-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
               Text({ style: { color: C.sub, fontSize: 12 }, selectable: true }, status.icons))
+          : null,
+        Btn("layout", "Show chat input layout", () => { status.layout = layoutReport(); refreshUI(); }),
+        status.layout
+          ? h(RN.View, { key: "layout-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
+              Text({ style: { color: C.sub, fontSize: 12 }, selectable: true }, status.layout))
           : null,
         Btn("scan", "Scan chat bar components", () => { status.scan = scanChatComponents(); refreshUI(); }),
         status.scan
@@ -894,6 +957,7 @@
     try { installSendHook(); } catch (_) {}
     try { attachButton(); } catch (_) {}
     try { hideChatButtons(); } catch (_) {}
+    try { installLayoutProbe(); } catch (_) {}
   }
 
   function onUnload() {
