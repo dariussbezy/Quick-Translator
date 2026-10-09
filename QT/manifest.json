@@ -3,5 +3,5 @@
   "description": "Translate what you type and the messages you read with Google Translate. Auto-detects the language, with one-time options and immersive translation.",
   "authors": [{ "name": "dariussbezy" }],
   "main": "index.js",
-  "hash": "4491c586a9e30a4f94147c74ff613c5e9805ec0c44ccaff16caa4eff2058b8c2"
+  "hash": "7394872acf8ec288742d049ba157d97ae3e1ecee0c7c7580ab286a1c3d321751"
 }

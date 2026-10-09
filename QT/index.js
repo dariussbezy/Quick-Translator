@@ -773,6 +773,14 @@
     renderErrors = 0;
     if (!loadStores()) { toast("Quick Translate: required Discord modules not found"); return; }
 
+    try { renderUnpatch = patchRender(); } catch (_) {}
+    try {
+      ActionSheet = findByProps("openLazy", "hideActionSheet");
+      if (ActionSheet) unpatches.push(patcher.before("openLazy", ActionSheet, hookSheet));
+    } catch (_) {}
+    try { installInputCapture(); } catch (_) {}
+    try { installSendHook(); } catch (_) {}
+    try { attachButton(); } catch (_) {}
   }
 
   function onUnload() {
