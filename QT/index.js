@@ -251,6 +251,7 @@
     const canWrite = !!(bridge.change || bridge.inst) && Date.now() - bridge.seen < 600000;
     if (!canWrite) {
       armed = { tl, sl };
+      notifyButton();
       toast("Your next message will be translated to " + langName(tl) + " when you send it");
       return Promise.resolve();
     }
@@ -284,6 +285,7 @@
           const job = armed;
           if ((job || cfg().translateOnSend) && msg && typeof msg.content === "string" && msg.content.trim()) {
             armed = null;
+            notifyButton();
             pending = translate(msg.content, job ? job.tl : cfg().targetOut, job ? job.sl : cfg().sourceOut, false).then((r) => {
               if (!r.same) args[1] = Object.assign({}, msg, { content: r.text });
             });
@@ -409,6 +411,8 @@
 
   let iconCache;
   let capturedIcon = null;
+  const buttonListeners = new Set();
+  function notifyButton() { buttonListeners.forEach((f) => { try { f(); } catch (_) {} }); }
   function translateAssetId() {
     if (iconCache === undefined) {
       iconCache = safe(() => {
@@ -489,8 +493,12 @@
       if (tpl.props.icon !== undefined) {
         if (nativeIcon !== undefined) props.icon = nativeIcon;
         else {
-          const id = translateAssetId();
-          props.icon = id && React.isValidElement(tpl.props.icon) ? React.cloneElement(tpl.props.icon, { source: id }) : undefined;
+          const el = iconAsComponent();
+          if (el) props.icon = el;
+          else {
+            const id = translateAssetId();
+            props.icon = id && React.isValidElement(tpl.props.icon) ? React.cloneElement(tpl.props.icon, { source: id }) : undefined;
+          }
         }
       }
       return React.cloneElement(tpl, props);
@@ -564,8 +572,6 @@
     return null;
   }
 
-  const ICON_MODES = ["auto", "component", "image", "emoji"];
-
   function iconAsComponent() {
     const keys = [cfg().iconKey, "LanguageIcon", "TranslateIcon"].filter(Boolean);
     for (const key of keys) {
@@ -586,16 +592,11 @@
   }
 
   function translateIcon(C) {
-    const mode = cfg().iconMode || "auto";
-    let el = null;
-    if (mode === "auto") {
-      el = iconAsComponent();
-      if (!el && capturedIcon && React.isValidElement(capturedIcon)) { status.icon = "copied from Discord menu"; el = capturedIcon; }
-      if (!el) el = iconAsImage(C);
-    } else if (mode === "component") el = iconAsComponent();
-    else if (mode === "image") el = iconAsImage(C);
+    let el = iconAsComponent();
+    if (!el && capturedIcon && React.isValidElement(capturedIcon)) { status.icon = "copied from Discord menu"; el = capturedIcon; }
+    if (!el) el = iconAsImage(C);
     if (el) return el;
-    status.icon = "emoji (" + mode + ")";
+    status.icon = "emoji";
     return React.createElement(RN.Text, { style: { fontSize: 20, textAlign: "center" } }, "\uD83C\uDF10");
   }
 
@@ -607,7 +608,14 @@
     const [from, setFrom] = React.useState("auto");
     const [to, setTo] = React.useState("en");
     const [query, setQuery] = React.useState("");
-    React.useEffect(() => { status.button = "visible in chat bar"; }, []);
+    const [, tick] = React.useState(0);
+    React.useEffect(() => {
+      status.button = "visible in chat bar";
+      const f = () => tick((x) => x + 1);
+      buttonListeners.add(f);
+      return () => { buttonListeners.delete(f); };
+    }, []);
+    const selected = armed != null || !!cfg().translateOnSend;
     if (cfg().showButton === false) return null;
     const C = palette();
 
@@ -675,10 +683,13 @@
     }
 
     const wrapperStyle = { marginRight: 6 };
-    const buttonStyle = { width: 40, height: 40, borderRadius: 20, backgroundColor: C.card, alignItems: "center", justifyContent: "center" };
+    const buttonStyle = { width: 40, height: 40, borderRadius: 20, backgroundColor: selected ? "#5865F2" : C.card, alignItems: "center", justifyContent: "center" };
     return h(RN.View, { style: wrapperStyle },
       h(RN.Pressable, {
-        onPress: () => run(cfg().targetOut || "en", cfg().sourceOut || "auto"),
+        onPress: () => {
+          if (armed) { armed = null; notifyButton(); toast("Translation cancelled"); return; }
+          run(cfg().targetOut || "en", cfg().sourceOut || "auto");
+        },
         onLongPress: openPanel,
         delayLongPress: 350,
         style: [buttonStyle, { alignItems: "center", justifyContent: "center", opacity: busy ? 0.5 : 1 }],
@@ -748,36 +759,6 @@
     }
   }
 
-  const probes = {};
-  function installLayoutProbe() {
-    for (const name of ["ChatInputNativeComponent", "ChatInputActions", "ChatInput"]) {
-      try {
-        const target = resolveTarget(name);
-        if (!target) { probes[name] = "not patchable"; continue; }
-        unpatches.push(patcher.before(target[1], target[0], (args) => {
-          const now = Date.now();
-          const prev = probes[name];
-          if (prev && prev.at && now - prev.at < 1500) return;
-          const p = args[0];
-          if (!p || typeof p !== "object") return;
-          const parts = Object.keys(p).slice(0, 60).map((k) => {
-            const v = p[k];
-            const ty = typeof v;
-            return k + (ty === "number" || ty === "boolean" ? "=" + v : ty === "string" ? "=" + v.slice(0, 18) : ":" + ty);
-          });
-          probes[name] = { at: now, text: parts.join(", ") };
-        }));
-      } catch (_) { probes[name] = "error"; }
-    }
-  }
-
-  function layoutReport() {
-    return Object.keys(probes).map((n) => {
-      const p = probes[n];
-      return n + ": " + (typeof p === "string" ? p : p && p.text ? p.text : "not rendered yet");
-    }).join("\n\n") || "no data yet";
-  }
-
   function scanChatComponents() {
     const found = new Set();
     safe(() => metro.find((m) => {
@@ -832,7 +813,7 @@
         right ? Text({ style: { color: C.sub, fontSize: 15, marginLeft: 8 } }, right) : null);
     const Switch = (key, label, sub) => {
       const value = !!cfg()[key];
-      const change = (v) => { cfg()[key] = v; refreshUI(); };
+      const change = (v) => { cfg()[key] = v; refreshUI(); notifyButton(); };
       return F && F.FormSwitchRow
         ? h(F.FormSwitchRow, { key, label, subLabel: sub, value, onValueChange: change })
         : h(RN.View, { key, style: { flexDirection: "row", alignItems: "center", padding: 16 } },
@@ -896,11 +877,6 @@
         Section("Chat bar"),
         Switch("showButton", "Translate button", "Tap to translate what you typed. Long-press for one-time options"),
         Switch("translateOnSend", "Translate on send", "Translate every message right before it is sent"),
-        PressRow("iconMode", "Icon style", "Tap to change if the icon looks wrong", () => {
-          const i = ICON_MODES.indexOf(cfg().iconMode || "auto");
-          cfg().iconMode = ICON_MODES[(i + 1) % ICON_MODES.length];
-          refreshUI();
-        }, cfg().iconMode || "auto"),
         PressRow("anchor", "Button position", "Tap to change, then restart Discord", () => {
           const i = ANCHORS.findIndex((x) => x.id === currentAnchor().id);
           cfg().anchor = ANCHORS[(i + 1) % ANCHORS.length].id;
@@ -922,11 +898,6 @@
         status.icons
           ? h(RN.View, { key: "icons-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
               Text({ style: { color: C.sub, fontSize: 12 }, selectable: true }, status.icons))
-          : null,
-        Btn("layout", "Show chat input layout", () => { status.layout = layoutReport(); refreshUI(); }),
-        status.layout
-          ? h(RN.View, { key: "layout-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
-              Text({ style: { color: C.sub, fontSize: 12 }, selectable: true }, status.layout))
           : null,
         Btn("scan", "Scan chat bar components", () => { status.scan = scanChatComponents(); refreshUI(); }),
         status.scan
@@ -957,7 +928,6 @@
     try { installSendHook(); } catch (_) {}
     try { attachButton(); } catch (_) {}
     try { hideChatButtons(); } catch (_) {}
-    try { installLayoutProbe(); } catch (_) {}
   }
 
   function onUnload() {
