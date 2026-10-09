@@ -251,7 +251,7 @@
     const canWrite = !!(bridge.change || bridge.inst) && Date.now() - bridge.seen < 600000;
     if (!canWrite) {
       armed = { tl, sl };
-      toast("Could not read the chat box. Your next message will be translated to " + langName(tl) + " when you send it");
+      toast("Your next message will be translated to " + langName(tl) + " when you send it");
       return Promise.resolve();
     }
     const text = readInput();
@@ -458,7 +458,13 @@
       };
       if (typeof tpl.props.message === "string") props.message = item.label;
       if (typeof tpl.props.label === "string") props.label = item.label;
-      if (tpl.props.icon !== undefined) props.icon = nativeIcon !== undefined ? nativeIcon : (translateAssetId() || undefined);
+      if (tpl.props.icon !== undefined) {
+        if (nativeIcon !== undefined) props.icon = nativeIcon;
+        else {
+          const id = translateAssetId();
+          props.icon = id && React.isValidElement(tpl.props.icon) ? React.cloneElement(tpl.props.icon, { source: id }) : undefined;
+        }
+      }
       return React.cloneElement(tpl, props);
     });
     last.list.splice(0, 0, ...elements);
@@ -611,8 +617,8 @@
       ];
     }
 
-    const wrapperStyle = props.styleWrapper || null;
-    const buttonStyle = props.styleButton || { width: 36, height: 36, alignItems: "center", justifyContent: "center" };
+    const wrapperStyle = { width: 40, height: 40, marginHorizontal: 2, alignItems: "center", justifyContent: "center" };
+    const buttonStyle = { width: 40, height: 40, alignItems: "center", justifyContent: "center" };
     return h(RN.View, { style: wrapperStyle },
       h(RN.Pressable, {
         onPress: () => run(cfg().targetOut || "en", cfg().sourceOut || "auto"),
