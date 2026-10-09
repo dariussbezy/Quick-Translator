@@ -412,11 +412,15 @@
     if (iconCache === undefined) {
       iconCache = safe(() => {
         const names = Object.keys(ui.assets.all || {});
-        const hit = names.find((n) => /translate/i.test(n)) || names.find((n) => /language|globe/i.test(n));
+        const hit = names.find((n) => /translate/i.test(n)) || names.find((n) => /locale/i.test(n)) || names.find((n) => /language|globe/i.test(n));
         return hit ? ui.assets.getAssetIDByName(hit) : null;
       }, null);
     }
     return iconCache;
+  }
+
+  function scanIcons() {
+    return safe(() => Object.keys(ui.assets.all || {}).filter((n) => /translat|locale|language|globe/i.test(n)).sort().join("\n"), "") || "none found";
   }
 
   // ---------- message long-press menu ----------
@@ -617,8 +621,8 @@
       ];
     }
 
-    const wrapperStyle = { width: 40, height: 40, marginHorizontal: 2, alignItems: "center", justifyContent: "center" };
-    const buttonStyle = { width: 40, height: 40, alignItems: "center", justifyContent: "center" };
+    const wrapperStyle = { marginRight: 6 };
+    const buttonStyle = { width: 40, height: 40, borderRadius: 20, backgroundColor: C.card, alignItems: "center", justifyContent: "center" };
     return h(RN.View, { style: wrapperStyle },
       h(RN.Pressable, {
         onPress: () => run(cfg().targetOut || "en", cfg().sourceOut || "auto"),
@@ -650,7 +654,8 @@
   }
 
   function attachButton() {
-    for (const name of ["ChatInputActionButtonGiftOrThread", "ChatInputActionButtonGift"]) {
+    const names = ["ChatInputSendButton", "ChatInputActionButtonGiftOrThread", "ChatInputActionButtonGift"];
+    for (const name of names) {
       const mod = findComponentModule(name);
       if (!mod) continue;
       const comp = mod.default && nameOfComponent(mod.default) === name ? mod.default : mod;
@@ -658,17 +663,14 @@
         ? (mod.default === comp ? [mod, "default"] : null)
         : patchTarget(comp);
       if (!target) continue;
+      const beside = name === "ChatInputSendButton";
       try {
         unpatches.push(patcher.after(target[1], target[0], (args, ret) => {
           if (cfg().showButton === false) return undefined;
-          const props = args[0] || {};
-          return React.createElement(React.Fragment, null,
-            React.createElement(TranslateButton, {
-              key: "qt-button",
-              styleWrapper: props.styleButtonWrapper || props.style,
-              styleButton: props.styleButton,
-            }),
-            ret);
+          if (beside && !ret) return undefined;
+          const btn = React.createElement(TranslateButton, { key: "qt-button" });
+          if (beside) return React.createElement(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, btn, ret);
+          return React.createElement(React.Fragment, null, btn, ret);
         }));
         status.button = "attached to " + name + ", waiting for the chat bar";
         return;
@@ -774,6 +776,11 @@
           Text({ style: { color: C.sub, fontSize: 12 }, selectable: true },
             "Chat bar button: " + status.button + "\nChat box: " + status.input + "\nSend hook: " + status.send)),
         Btn("refresh", "Refresh status", refreshUI),
+        Btn("icons", "Scan icons", () => { status.icons = scanIcons(); refreshUI(); }),
+        status.icons
+          ? h(RN.View, { key: "icons-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
+              Text({ style: { color: C.sub, fontSize: 12 }, selectable: true }, status.icons))
+          : null,
         Btn("scan", "Scan chat bar components", () => { status.scan = scanChatComponents(); refreshUI(); }),
         status.scan
           ? h(RN.View, { key: "scan-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
