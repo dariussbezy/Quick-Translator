@@ -708,10 +708,8 @@
   }
 
   const ANCHORS = [
-    { id: "gift", label: "Replace the Gift button", name: "ChatInputActionButtonGiftOrThread", mode: "replace" },
-    { id: "apps", label: "Replace the Apps button", name: "ChatInputActionButtonApps", mode: "replace" },
-    { id: "send", label: "Next to the Send button", name: "ChatInputSendButton", mode: "beside" },
     { id: "actions", label: "Next to the + button", name: "ChatInputActions", mode: "append" },
+    { id: "send", label: "Next to the Send button", name: "ChatInputSendButton", mode: "beside" },
   ];
   const currentAnchor = () => ANCHORS.find((a) => a.id === cfg().anchor) || ANCHORS[0];
   const hiddenNames = () => {
@@ -750,27 +748,14 @@
   // Each hidden slot reports itself (SlotMarker), and ReclaimWrap shrinks the left button
   // group by exactly that many slots, so the chat box grows over them.
   const SLOT = 48; // 40pt button + 8pt gap
-  const slots = new Map();
   const layoutListeners = new Set();
   const notifyLayout = () => layoutListeners.forEach((f) => { try { f(); } catch (_) {} });
-  const slotId = (name) => (/Apps$/.test(name) ? "apps" : "gift");
-  const slotCount = () => { let n = 0; slots.forEach((v) => { if (v > 0) n++; }); return n; };
   let dumpArmed = false;
 
   function reclaimAmount() {
     const c = cfg();
     if (c.hideExtras === false || c.reclaim === false) return 0;
-    const n = typeof c.reclaimSlots === "number" ? c.reclaimSlots : slotCount();
-    return Math.max(0, Math.min(2, n)) * SLOT;
-  }
-
-  function SlotMarker(props) {
-    React.useEffect(() => {
-      slots.set(props.id, (slots.get(props.id) || 0) + 1);
-      notifyLayout();
-      return () => { slots.set(props.id, Math.max(0, (slots.get(props.id) || 1) - 1)); notifyLayout(); };
-    }, [props.id]);
-    return null;
+    return 2 * SLOT; // Gift + Apps, both always hidden now
   }
 
   function ReclaimWrap(props) {
@@ -785,7 +770,7 @@
     const R = reclaimAmount();
     // Never shrink below one button, and do nothing while Discord has the group collapsed.
     const width = natural > 0 && R > 0 ? Math.max(natural - R, Math.min(natural, SLOT)) : undefined;
-    status.reclaim = "slots " + slotCount() + ", natural " + natural + "pt, reclaiming " + (width !== undefined ? natural - width : 0) + "pt";
+    status.reclaim = "natural " + natural + "pt, reclaiming " + (width !== undefined ? natural - width : 0) + "pt";
     const outer = { flexShrink: 0, flexGrow: 0 };
     if (props.align) outer.alignSelf = props.align;
     if (width !== undefined) outer.width = width;
@@ -849,12 +834,9 @@
         unpatches.push(patcher.instead(target[1], target[0], (args, orig) => {
           const props = args[0];
           if (cfg().hideExtras !== false && props && typeof props === "object") {
-            let found = null;
             for (const k of Object.keys(props)) {
-              found = heldName(props[k], 0, hiddenNames());
-              if (found) break;
+              if (heldName(props[k], 0, hiddenNames())) return null;
             }
-            if (found) return React.createElement(SlotMarker, { id: slotId(found) });
           }
           return orig(...args);
         }));
@@ -994,12 +976,6 @@
         }, currentAnchor().label),
         Switch("hideExtras", "Hide Gift and Apps buttons", "Removes them from the chat bar. Restart Discord to apply"),
         Switch("reclaim", "Expand chat box over hidden buttons", "The chat box takes the space the hidden buttons left. Restart Discord to apply"),
-        PressRow("slots", "Hidden slots to reclaim", "Auto counts the buttons actually hidden. Set 1 or 2 if Auto is wrong", () => {
-          const order = ["auto", 1, 2, 0];
-          const cur = typeof cfg().reclaimSlots === "number" ? cfg().reclaimSlots : "auto";
-          cfg().reclaimSlots = order[(order.indexOf(cur) + 1) % order.length];
-          refreshUI(); notifyLayout();
-        }, typeof cfg().reclaimSlots === "number" ? String(cfg().reclaimSlots) : "Auto"),
         Btn("dump", "Capture chat bar layout", () => { dumpArmed = true; status.layout = ""; toast("Now tap the chat box, then come back and press Refresh status"); }),
         status.layout
           ? h(RN.View, { key: "layout-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
@@ -1041,9 +1017,10 @@
     const s = cfg();
     const defaults = {
       targetOut: "en", targetIn: "en", sourceOut: "auto", immersive: true, showButton: true,
-      translateOnSend: false, hideExtras: true, reclaim: true, reclaimSlots: "auto", anchor: "gift", favLangs: ["en", "es", "fr", "de", "ro", "ru"],
+      translateOnSend: false, hideExtras: true, reclaim: true, anchor: "actions", favLangs: ["en", "es", "fr", "de", "ro", "ru"],
     };
     for (const k of Object.keys(defaults)) if (s[k] === undefined) s[k] = defaults[k];
+    if (!ANCHORS.some((a) => a.id === s.anchor)) s.anchor = "actions";
     renderErrors = 0;
     errors.length = 0;
     step("stores", () => { if (!loadStores()) errors.push("stores: some Discord stores were not found"); });
@@ -1069,7 +1046,6 @@
     bridge.inst = null;
     armed = null;
     lastOriginal = null;
-    slots.clear();
     layoutListeners.clear();
     dumpArmed = false;
   }
