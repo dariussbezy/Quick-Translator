@@ -1,11 +1,11 @@
 {
   "name": "Quick Translate",
-  "description": "Translate what you type and the messages you read with Google Translate. Auto-detects the language, with one-time options and immersive translation.",
+  "description": "A very stable plugin that translates messages using Google Translate. Check the plugin settings!",
   "authors": [
     {
       "name": "dariussbezy"
     }
   ],
   "main": "index.js",
-  "hash": "b89970c47ff65e804909b654e319739fc59e8676fc15a91e8737023c959e95e6"
+  "hash": "3013eaaebc9105543d93572ea6dcc112d1ce789a4e076f68c5915aff4e25928f"
 }

@@ -1,12 +1,11 @@
 (() => {
-  try {
-    return (() => {
   "use strict";
   const { metro, patcher, plugin, ui } = vendetta;
   const vstorage = vendetta.storage;
   const { findByProps, findByStoreName } = metro;
   const { FluxDispatcher, React, ReactNative: RN } = metro.common;
 
+  const BUILD = "v1.0.0";
   const FLAG_TOGGLE = 0x04000000;
   const ACCENT = "#8EA1FF";
   const MAX_TRANSLATIONS = 300;
@@ -36,7 +35,6 @@
   const cache = new Map();
   const unpatches = [];
   const bridge = { text: "", change: null, inst: null, seen: 0 };
-  const status = { button: "not attached", input: "not detected yet", send: "not hooked" };
   const refWrappers = new WeakMap();
   let armed = null;
   let lastOriginal = null;
@@ -89,6 +87,53 @@
       : { text: "#FFFFFF", sub: "#B5BAC1", bg: "#1E1F22", card: "#2B2D31", line: "#3F4147" };
   }
 
+  const HEX = /^#[0-9A-Fa-f]{6}$/;
+  const translationColor = () => (HEX.test(String(cfg().translationColor || "")) ? String(cfg().translationColor).toUpperCase() : ACCENT);
+
+  function closeAlert() {
+    try {
+      const alerts = findByProps("openLazy", "close");
+      if (alerts && typeof alerts.close === "function") alerts.close();
+    } catch (_) {}
+  }
+
+  function ColorModal(props) {
+    const h = React.createElement;
+    const [value, setValue] = React.useState(String(props.initialValue || ACCENT));
+    const [error, setError] = React.useState("");
+    const C = palette();
+    const presets = [
+      ["Default", ACCENT], ["Red", "#ED4245"], ["Orange", "#F07B3E"], ["Gold", "#F1C40F"], ["Green", "#43B581"],
+      ["Teal", "#1ABC9C"], ["Blue", "#3498DB"], ["Indigo", "#5865F2"], ["Purple", "#9B59B6"], ["Pink", "#EB459E"], ["Gray", "#80848E"],
+    ];
+    const action = (label, onPress, primary) =>
+      h(RN.Pressable, {
+        key: label, onPress,
+        style: { minHeight: 44, paddingHorizontal: 16, borderRadius: 8, marginLeft: primary ? 10 : 0, alignItems: "center", justifyContent: "center", backgroundColor: primary ? "#5865F2" : "rgba(128,128,128,0.22)" },
+      }, h(RN.Text, { style: { color: "#FFFFFF", fontSize: 15, fontWeight: "600" } }, label));
+    const finish = (hex) => { closeAlert(); props.onSave(hex); };
+    const save = () => {
+      const hex = String(value).trim().toUpperCase();
+      if (!HEX.test(hex)) { setError("Enter a HEX color such as #3366FF."); return; }
+      finish(hex);
+    };
+    return h(RN.ScrollView, { style: { width: "100%", maxWidth: 440, maxHeight: "90%", alignSelf: "center", padding: 20, borderRadius: 14, backgroundColor: C.bg } },
+      h(RN.Text, { style: { color: C.text, fontSize: 20, fontWeight: "700", marginBottom: 8 } }, "Translation color"),
+      h(RN.Text, { style: { color: C.sub, fontSize: 14, marginBottom: 12 } }, "Choose a preset or enter a HEX color."),
+      h(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", marginBottom: 12 } }, presets.map(([label, hex]) =>
+        h(RN.Pressable, { key: hex, onPress: () => { setValue(hex); setError(""); }, style: { width: 62, alignItems: "center", marginRight: 6, marginBottom: 8 } },
+          h(RN.View, { style: { width: 34, height: 34, borderRadius: 17, backgroundColor: hex, borderWidth: value.toUpperCase() === hex ? 3 : 1, borderColor: C.text } }),
+          h(RN.Text, { style: { color: C.text, fontSize: 11, marginTop: 3 } }, label)))),
+      h(RN.View, { style: { width: 44, height: 24, marginBottom: 12, borderRadius: 6, backgroundColor: HEX.test(value) ? value : "transparent", borderWidth: 1, borderColor: C.sub } }),
+      h(RN.TextInput, {
+        value, onChangeText: (t) => { setValue(t); setError(""); }, autoCapitalize: "characters", autoCorrect: false, placeholder: "#3366FF", placeholderTextColor: C.sub,
+        style: { minHeight: 48, paddingHorizontal: 12, borderRadius: 8, color: C.text, fontSize: 17, backgroundColor: "rgba(128,128,128,0.16)" },
+      }),
+      error ? h(RN.Text, { style: { color: "#ED4245", fontSize: 13, marginTop: 8 } }, error) : null,
+      h(RN.View, { style: { flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", marginTop: 18 } },
+        action("Default", () => finish(ACCENT), false), action("Cancel", closeAlert, false), action("Save", save, true)));
+  }
+
   function ask(title, message, buttons) {
     const ios = RN.Platform && RN.Platform.OS === "ios";
     const list = buttons.slice(0, ios ? 6 : 3);
@@ -110,12 +155,6 @@
       fetch(url, opts),
       new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out")), TIMEOUT)),
     ]);
-  }
-
-  function decodeEntities(s) {
-    return s
-      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
-      .replace(/&quot;/g, "\"").replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   }
 
   function callApi(text, tl, sl) {
@@ -205,13 +244,12 @@
 
   function installInputCapture() {
     const TI = RN.TextInput;
-    if (!TI || typeof TI.render !== "function") { status.input = "text input cannot be patched"; return; }
+    if (!TI || typeof TI.render !== "function") return;
     unpatches.push(patcher.before("render", TI, (args) => {
       try {
         const props = args[0];
         if (!props || !isChatInput(props)) return;
         bridge.seen = Date.now();
-        status.input = "detected";
         const original = props.onChangeText;
         bridge.change = typeof original === "function" ? original : null;
         if (typeof props.value === "string") bridge.text = props.value;
@@ -279,7 +317,7 @@
   function installSendHook() {
     try {
       MessageActions = findByProps("sendMessage", "receiveMessage");
-      if (!MessageActions) { status.send = "send function not found"; return; }
+      if (!MessageActions) return;
       unpatches.push(patcher.instead("sendMessage", MessageActions, (args, orig) => {
         let pending = null;
         try {
@@ -296,8 +334,7 @@
         if (!pending) return orig(...args);
         return pending.catch(() => { toast("Translation failed, sent the original message"); }).then(() => orig(...args));
       }));
-      status.send = "hooked";
-    } catch (_) { status.send = "could not hook"; }
+    } catch (_) {}
   }
 
   // ---------- messages ----------
@@ -323,12 +360,16 @@
     toast("Translating...");
     return translate(text, tl, "auto", true).then((r) => {
       if (r.same) { toast("Already in " + langName(tl)); return; }
-      translations.set(message.id, { text: r.text, src: r.src, tl, at: Date.now() });
+      translations.set(message.id, { text: r.text, src: r.src, tl, at: Date.now(), ch: channelId });
       trimMap(translations, MAX_TRANSLATIONS);
       refreshRow(channelId, message.id);
     }).catch((e) => {
       toast("Translation failed: " + (e && e.message ? e.message : e));
     });
+  }
+
+  function refreshTranslated() {
+    translations.forEach((t, id) => { if (t.ch) refreshRow(t.ch, id); });
   }
 
   function showOriginal(message) {
@@ -378,7 +419,7 @@
     const base = ours ? m.__trBase : Array.isArray(m.content) ? stripOurs(m.content) : null;
     if (!Array.isArray(base)) return;
     const pc = RN && RN.processColor;
-    const color = pc ? pc(ACCENT) : null;
+    const color = pc ? pc(translationColor()) : null;
     const text = { type: "text", content: tr.text, __tr: true };
     let out;
     if (cfg().immersive) out = base.concat([{ type: "text", content: "\n", __tr: true }], paint([text], color));
@@ -424,28 +465,6 @@
       }, null);
     }
     return iconCache;
-  }
-
-  function scanIconsDeep() {
-    const keys = new Set();
-    safe(() => metro.find((m) => {
-      try {
-        const objs = [m, m && m.default];
-        for (const o of objs) {
-          if (!o || (typeof o !== "object" && typeof o !== "function")) continue;
-          for (const k of Object.keys(o)) if (/ranslat|locale|language|globe/i.test(k)) keys.add(k);
-        }
-      } catch (_) {}
-      return false;
-    }), null);
-    const list = Array.from(keys).sort();
-    const pick = list.find((k) => /^Translate\w*Icon$/.test(k)) || list.find((k) => /^(Language|Locale)\w*Icon$/.test(k));
-    if (pick) { try { cfg().iconKey = pick; iconCache = undefined; } catch (_) {} }
-    return (pick ? "Using: " + pick + "\n" : "") + (list.slice(0, 60).join("\n") || "none found");
-  }
-
-  function scanIcons() {
-    return safe(() => Object.keys(ui.assets.all || {}).filter((n) => /translat|locale|language|globe/i.test(n)).sort().join("\n"), "") || "none found";
   }
 
   // ---------- message long-press menu ----------
@@ -579,7 +598,7 @@
     for (const key of keys) {
       const comp = safe(() => (findByProps(key) || {})[key], null);
       if (comp) {
-        try { const el = React.createElement(comp, { size: "md" }); status.icon = key + " component"; return el; } catch (_) {}
+        try { const el = React.createElement(comp, { size: "md" }); return el; } catch (_) {}
       }
     }
     return null;
@@ -589,16 +608,14 @@
     const saved = cfg().iconSource;
     const id = (typeof saved === "number" ? saved : null) || translateAssetId();
     if (!id) return null;
-    status.icon = "image asset " + id;
     return React.createElement(RN.Image, { source: id, style: { width: 24, height: 24, tintColor: C.text } });
   }
 
   function translateIcon(C) {
     let el = iconAsComponent();
-    if (!el && capturedIcon && React.isValidElement(capturedIcon)) { status.icon = "copied from Discord menu"; el = capturedIcon; }
+    if (!el && capturedIcon && React.isValidElement(capturedIcon)) el = capturedIcon;
     if (!el) el = iconAsImage(C);
     if (el) return el;
-    status.icon = "emoji";
     return React.createElement(RN.Text, { style: { fontSize: 20, textAlign: "center" } }, "\uD83C\uDF10");
   }
 
@@ -612,7 +629,6 @@
     const [query, setQuery] = React.useState("");
     const [, tick] = React.useState(0);
     React.useEffect(() => {
-      status.button = "visible in chat bar";
       const f = () => tick((x) => x + 1);
       buttonListeners.add(f);
       return () => { buttonListeners.delete(f); };
@@ -724,106 +740,40 @@
     return typeof comp === "function" ? (mod.default === comp ? [mod, "default"] : null) : patchTarget(comp);
   }
 
-  // Returns the component name of the hidden button found inside a prop tree, or null.
-  function heldName(node, depth, names) {
-    if (!node || typeof node !== "object" || depth > 5) return null;
-    if (Array.isArray(node)) {
-      for (const c of node) { const f = heldName(c, depth + 1, names); if (f) return f; }
-      return null;
-    }
-    if (!node.$$typeof) return null;
-    const own = nameOfComponent(node.type);
-    if (names.indexOf(own) !== -1) return own;
+  function holdsHidden(node, depth, names) {
+    if (!node || typeof node !== "object" || depth > 5) return false;
+    if (Array.isArray(node)) return node.some((c) => holdsHidden(c, depth + 1, names));
+    if (!node.$$typeof) return false;
+    if (names.indexOf(nameOfComponent(node.type)) !== -1) return true;
     const p = node.props;
-    if (!p) return null;
-    for (const k of Object.keys(p)) {
-      const v = p[k];
-      if (v && typeof v === "object") { const f = heldName(v, depth + 1, names); if (f) return f; }
-    }
-    return null;
+    return !!p && Object.keys(p).some((k) => holdsHidden(p[k], depth + 1, names));
   }
 
-  // ---------- reclaim the space of hidden buttons ----------
-  // Discord keeps the width of the hidden Gift/Apps slots, so the chat box stays narrow.
-  // Each hidden slot reports itself (SlotMarker), and ReclaimWrap shrinks the left button
-  // group by exactly that many slots, so the chat box grows over them.
-  const SLOT = 48; // 40pt button + 8pt gap
-  const layoutListeners = new Set();
-  const notifyLayout = () => layoutListeners.forEach((f) => { try { f(); } catch (_) {} });
-  let dumpArmed = false;
-
-  function reclaimAmount() {
-    const c = cfg();
-    if (c.hideExtras === false || c.reclaim === false) return 0;
-    return 2 * SLOT; // Gift + Apps, both always hidden now
-  }
+  // ---------- give the hidden buttons' space to the chat box ----------
+  // Discord keeps the width of the hidden Gift and Apps slots, so the chat box stays narrow.
+  // The left button group is shrunk by those two slots (40pt button + 8pt gap each).
+  const RECLAIM = 96;
 
   function ReclaimWrap(props) {
     const h = React.createElement;
     const [natural, setNatural] = React.useState(0);
-    const [, tick] = React.useState(0);
-    React.useEffect(() => {
-      const f = () => tick((x) => x + 1);
-      layoutListeners.add(f);
-      return () => { layoutListeners.delete(f); };
-    }, []);
-    const R = reclaimAmount();
     // Never shrink below one button, and do nothing while Discord has the group collapsed.
-    const width = natural > 0 && R > 0 ? Math.max(natural - R, Math.min(natural, SLOT)) : undefined;
-    status.reclaim = "natural " + natural + "pt, reclaiming " + (width !== undefined ? natural - width : 0) + "pt";
-    const outer = { flexShrink: 0, flexGrow: 0 };
-    if (props.align) outer.alignSelf = props.align;
-    if (width !== undefined) outer.width = width;
-    return h(RN.View, { style: outer },
+    const width = natural > 0 ? Math.max(natural - RECLAIM, Math.min(natural, 48)) : undefined;
+    return h(RN.View, { style: { flexShrink: 0, flexGrow: 0, alignSelf: props.align, width } },
       h(RN.View, {
         onLayout: (e) => { const w = Math.round(e.nativeEvent.layout.width); if (w !== natural) setNatural(w); },
         style: { flexShrink: 0, alignSelf: "flex-start" },
       }, props.children));
   }
 
-  function describeNode(node, depth, out) {
-    if (out.length > 90) return;
-    const pad = "  ".repeat(depth);
-    if (Array.isArray(node)) { node.forEach((c) => describeNode(c, depth, out)); return; }
-    if (!node || typeof node !== "object" || !node.$$typeof) return;
-    const t = typeof node.type === "string" ? node.type : nameOfComponent(node.type) || "?";
-    let st = "";
-    safe(() => {
-      const parts = [];
-      const walk = (x) => {
-        if (!x) return;
-        if (Array.isArray(x)) { x.forEach(walk); return; }
-        if (typeof x !== "object") return;
-        if (x.viewDescriptors || x.initial) { parts.push("ANIM"); return; }
-        for (const k of ["width", "minWidth", "maxWidth", "flex", "flexGrow", "flexShrink", "flexBasis", "margin", "marginLeft", "marginRight", "paddingLeft", "paddingRight", "gap", "position", "left", "right", "alignSelf", "flexDirection"]) {
-          if (x[k] !== undefined) parts.push(k + "=" + x[k]);
-        }
-      };
-      walk(node.props && node.props.style);
-      st = parts.length ? " {" + parts.join(" ") + "}" : "";
-    }, null);
-    const extra = node.props && typeof node.props.layout !== "undefined" ? " layout-anim" : "";
-    out.push(pad + t + st + extra);
-    const kids = node.props && node.props.children;
-    if (kids && depth < 7) describeNode(kids, depth + 1, out);
-  }
-
   function installReclaim() {
     const target = resolveTarget("ChatInputActions");
-    if (!target) { status.reclaim = "ChatInputActions not found"; return; }
+    if (!target) return;
     unpatches.push(patcher.after(target[1], target[0], (args, ret) => {
-      if (!ret) return undefined;
-      if (dumpArmed) {
-        dumpArmed = false;
-        const out = [];
-        describeNode(ret, 0, out);
-        status.layout = out.join("\n");
-      }
-      if (cfg().reclaim === false || cfg().hideExtras === false) return undefined;
+      if (!ret || cfg().reclaim === false || cfg().hideExtras === false) return undefined;
       const st = safe(() => RN.StyleSheet.flatten(ret.props && ret.props.style), null);
       return React.createElement(ReclaimWrap, { align: st && st.alignSelf }, ret);
     }));
-    status.reclaim = "waiting for the chat bar";
   }
 
   function hideChatButtons() {
@@ -834,9 +784,8 @@
         unpatches.push(patcher.instead(target[1], target[0], (args, orig) => {
           const props = args[0];
           if (cfg().hideExtras !== false && props && typeof props === "object") {
-            for (const k of Object.keys(props)) {
-              if (heldName(props[k], 0, hiddenNames())) return null;
-            }
+            const names = hiddenNames();
+            if (Object.keys(props).some((k) => holdsHidden(props[k], 0, names))) return null;
           }
           return orig(...args);
         }));
@@ -851,35 +800,18 @@
     }
   }
 
-  function scanChatComponents() {
-    const found = new Set();
-    safe(() => metro.find((m) => {
-      try {
-        const n = nameOfComponent(m) || (m && m.default && nameOfComponent(m.default));
-        if (n && /^ChatInput/.test(n)) found.add(n);
-      } catch (_) {}
-      return false;
-    }), null);
-    return Array.from(found).sort().join("\n") || "none found";
-  }
-
   function attachButton() {
     const anchor = currentAnchor();
     const target = resolveTarget(anchor.name);
-    if (!target) { status.button = anchor.name + " not found"; return; }
-    const make = () => React.createElement(TranslateButton, { key: "qt-button" });
+    if (!target) return;
+    const row = (...kids) => React.createElement(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, ...kids);
     try {
-      if (anchor.mode === "replace") {
-        unpatches.push(patcher.instead(target[1], target[0], (args, orig) => (cfg().showButton === false ? orig(...args) : make())));
-      } else {
-        unpatches.push(patcher.after(target[1], target[0], (args, ret) => {
-          if (cfg().showButton === false || !ret) return undefined;
-          if (anchor.mode === "beside") return React.createElement(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, make(), ret);
-          return React.createElement(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, ret, make());
-        }));
-      }
-      status.button = "attached to " + anchor.name + ", waiting for the chat bar";
-    } catch (_) { status.button = "could not attach to " + anchor.name; }
+      unpatches.push(patcher.after(target[1], target[0], (args, ret) => {
+        if (cfg().showButton === false || !ret) return undefined;
+        const button = React.createElement(TranslateButton, { key: "qt-button" });
+        return anchor.mode === "beside" ? row(button, ret) : row(ret, button);
+      }));
+    } catch (_) {}
   }
 
   // ---------- settings ----------
@@ -897,15 +829,15 @@
     const Section = (title) =>
       h(RN.View, { key: "sec-" + title, style: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 4 } },
         Text({ style: { color: C.sub, fontSize: 12, fontWeight: "600" } }, title.toUpperCase()));
-    const PressRow = (key, label, sub, onPress, right) =>
+    const PressRow = (key, label, sub, onPress, right, rightColor) =>
       h(RN.Pressable, { key, onPress, style: { paddingHorizontal: 16, paddingVertical: 12, flexDirection: "row", alignItems: "center" } },
         h(RN.View, { style: { flex: 1 } },
           Text({ style: { color: C.text, fontSize: 16 } }, label),
           sub ? Text({ style: { color: C.sub, fontSize: 13, marginTop: 2 } }, sub) : null),
-        right ? Text({ style: { color: C.sub, fontSize: 15, marginLeft: 8 } }, right) : null);
+        right ? Text({ style: { color: rightColor || C.sub, fontSize: 15, marginLeft: 8 } }, right) : null);
     const Switch = (key, label, sub) => {
       const value = !!cfg()[key];
-      const change = (v) => { cfg()[key] = v; refreshUI(); notifyButton(); notifyLayout(); };
+      const change = (v) => { cfg()[key] = v; refreshUI(); notifyButton(); };
       return F && F.FormSwitchRow
         ? h(F.FormSwitchRow, { key, label, subLabel: sub, value, onValueChange: change })
         : h(RN.View, { key, style: { flexDirection: "row", alignItems: "center", padding: 16 } },
@@ -966,8 +898,16 @@
         PressRow("favs", "Quick languages", "Shown in the one-time menus", () => setScreen("favs"), (cfg().favLangs || []).length + " selected"),
         Section("Display"),
         Switch("immersive", "Immersive translation", "Show the translation below the original message. Off replaces the original text"),
+        PressRow("color", "Translation color", "Color of the translated text in messages", () => {
+          try {
+            ui.alerts.showCustomAlert(ColorModal, {
+              initialValue: translationColor(),
+              onSave: (hex) => { cfg().translationColor = hex; refreshUI(); refreshTranslated(); },
+            });
+          } catch (_) { toast("Could not open color settings"); }
+        }, translationColor(), translationColor()),
         Section("Chat bar"),
-        Switch("showButton", "Translate button", "Tap to translate what you typed. Long-press for one-time options"),
+        Switch("showButton", "Show translate button in chat box", "Turn off to only translate messages from their long-press menu"),
         Switch("translateOnSend", "Translate on send", "Translate every message right before it is sent"),
         PressRow("anchor", "Button position", "Tap to change, then restart Discord", () => {
           const i = ANCHORS.findIndex((x) => x.id === currentAnchor().id);
@@ -976,64 +916,35 @@
         }, currentAnchor().label),
         Switch("hideExtras", "Hide Gift and Apps buttons", "Removes them from the chat bar. Restart Discord to apply"),
         Switch("reclaim", "Expand chat box over hidden buttons", "The chat box takes the space the hidden buttons left. Restart Discord to apply"),
-        Btn("dump", "Capture chat bar layout", () => { dumpArmed = true; status.layout = ""; toast("Now tap the chat box, then come back and press Refresh status"); }),
-        status.layout
-          ? h(RN.View, { key: "layout-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
-              Text({ style: { color: C.sub, fontSize: 11 }, selectable: true }, status.layout),
-              Btn("copylayout", "Copy layout", () => copyText(status.layout)))
-          : null,
-        Btn("test", "Test translation", () => {
-          translate("Hello, how are you?", cfg().targetIn || "en", "auto", false).then((r) => {
-            ask("Test translation", r.same ? "Same language, nothing to translate." : r.text + "\n\nDetected: " + langName(r.src), [{ text: "OK" }]);
-          }).catch((e) => { ask("Test failed", String(e && e.message ? e.message : e), [{ text: "OK" }]); });
-        }),
-        Section("Status"),
-        h(RN.View, { key: "status", style: { paddingHorizontal: 16, paddingVertical: 8 } },
-          Text({ style: { color: C.sub, fontSize: 12 }, selectable: true },
-            "Chat bar button: " + status.button + "\nChat box: " + status.input + "\nSend hook: " + status.send + "\nIcon: " + (status.icon || "not drawn yet") + "\nReclaim: " + (status.reclaim || "off") + "\nErrors: " + (errors.join("; ") || "none"))),
-        Btn("refresh", "Refresh status", refreshUI),
-        Btn("icons", "Scan icons", () => { status.icons = scanIcons(); refreshUI(); }),
-        Btn("icons2", "Advanced icon scan", () => { status.icons = scanIconsDeep(); refreshUI(); }),
-        status.icons
-          ? h(RN.View, { key: "icons-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
-              Text({ style: { color: C.sub, fontSize: 12 }, selectable: true }, status.icons))
-          : null,
-        Btn("scan", "Scan chat bar components", () => { status.scan = scanChatComponents(); refreshUI(); }),
-        status.scan
-          ? h(RN.View, { key: "scan-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
-              Text({ style: { color: C.sub, fontSize: 12 }, selectable: true }, status.scan))
-          : null,
       ];
     }
-    return h(RN.ScrollView, null, ...content);
+    content.unshift(h(RN.View, { key: "build", style: { paddingHorizontal: 16, paddingTop: 8 } },
+      Text({ style: { color: C.sub, fontSize: 11 } }, "Build " + BUILD)));
+    return h(RN.ScrollView, { key: screen }, ...content);
   }
 
-  const errors = [];
-  const step = (name, fn) => {
-    try { fn(); } catch (e) { errors.push(name + ": " + (e && e.message ? e.message : String(e))); }
-  };
+  const step = (fn) => { try { fn(); } catch (_) {} };
 
   function onLoad() {
     const s = cfg();
     const defaults = {
-      targetOut: "en", targetIn: "en", sourceOut: "auto", immersive: true, showButton: true,
+      targetOut: "en", targetIn: "en", sourceOut: "auto", immersive: true, translationColor: ACCENT, showButton: true,
       translateOnSend: false, hideExtras: true, reclaim: true, anchor: "actions", favLangs: ["en", "es", "fr", "de", "ro", "ru"],
     };
     for (const k of Object.keys(defaults)) if (s[k] === undefined) s[k] = defaults[k];
     if (!ANCHORS.some((a) => a.id === s.anchor)) s.anchor = "actions";
     renderErrors = 0;
-    errors.length = 0;
-    step("stores", () => { if (!loadStores()) errors.push("stores: some Discord stores were not found"); });
-    step("renderer", () => { renderUnpatch = patchRender(); });
-    step("actionSheet", () => {
+    step(loadStores);
+    step(() => { renderUnpatch = patchRender(); });
+    step(() => {
       ActionSheet = findByProps("openLazy", "hideActionSheet");
       if (ActionSheet) unpatches.push(patcher.before("openLazy", ActionSheet, hookSheet));
     });
-    step("inputCapture", installInputCapture);
-    step("sendHook", installSendHook);
-    step("reclaim", installReclaim);
-    step("chatButton", attachButton);
-    step("hideButtons", hideChatButtons);
+    step(installInputCapture);
+    step(installSendHook);
+    step(installReclaim);
+    step(attachButton);
+    step(hideChatButtons);
   }
 
   function onUnload() {
@@ -1046,19 +957,7 @@
     bridge.inst = null;
     armed = null;
     lastOriginal = null;
-    layoutListeners.clear();
-    dumpArmed = false;
   }
 
   return { onLoad, onUnload, settings: Settings };
-})();
-  } catch (e) {
-    const msg = (e && e.stack) ? String(e.stack).slice(0, 900) : String(e);
-    return {
-      onLoad() { try { vendetta.ui.toasts.showToast("Quick Translate failed to start"); } catch (_) {} },
-      onUnload() {},
-      settings: () => vendetta.metro.common.React.createElement(vendetta.metro.common.ReactNative.Text,
-        { selectable: true, style: { padding: 16, color: "#FFFFFF" } }, "Quick Translate failed to start:\n\n" + msg),
-    };
-  }
 })()
