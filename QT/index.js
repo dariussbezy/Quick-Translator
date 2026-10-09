@@ -726,17 +726,119 @@
     return typeof comp === "function" ? (mod.default === comp ? [mod, "default"] : null) : patchTarget(comp);
   }
 
-  function holdsHidden(node, depth, names) {
-    if (!node || typeof node !== "object" || depth > 5) return false;
-    if (Array.isArray(node)) return node.some((c) => holdsHidden(c, depth + 1, names));
-    if (!node.$$typeof) return false;
-    if (names.indexOf(nameOfComponent(node.type)) !== -1) return true;
+  // Returns the component name of the hidden button found inside a prop tree, or null.
+  function heldName(node, depth, names) {
+    if (!node || typeof node !== "object" || depth > 5) return null;
+    if (Array.isArray(node)) {
+      for (const c of node) { const f = heldName(c, depth + 1, names); if (f) return f; }
+      return null;
+    }
+    if (!node.$$typeof) return null;
+    const own = nameOfComponent(node.type);
+    if (names.indexOf(own) !== -1) return own;
     const p = node.props;
-    if (!p) return false;
-    return Object.keys(p).some((k) => {
+    if (!p) return null;
+    for (const k of Object.keys(p)) {
       const v = p[k];
-      return !!v && typeof v === "object" && holdsHidden(v, depth + 1, names);
-    });
+      if (v && typeof v === "object") { const f = heldName(v, depth + 1, names); if (f) return f; }
+    }
+    return null;
+  }
+
+  // ---------- reclaim the space of hidden buttons ----------
+  // Discord keeps the width of the hidden Gift/Apps slots, so the chat box stays narrow.
+  // Each hidden slot reports itself (SlotMarker), and ReclaimWrap shrinks the left button
+  // group by exactly that many slots, so the chat box grows over them.
+  const SLOT = 48; // 40pt button + 8pt gap
+  const slots = new Map();
+  const layoutListeners = new Set();
+  const notifyLayout = () => layoutListeners.forEach((f) => { try { f(); } catch (_) {} });
+  const slotId = (name) => (/Apps$/.test(name) ? "apps" : "gift");
+  const slotCount = () => { let n = 0; slots.forEach((v) => { if (v > 0) n++; }); return n; };
+  let dumpArmed = false;
+
+  function reclaimAmount() {
+    const c = cfg();
+    if (c.hideExtras === false || c.reclaim === false) return 0;
+    const n = typeof c.reclaimSlots === "number" ? c.reclaimSlots : slotCount();
+    return Math.max(0, Math.min(2, n)) * SLOT;
+  }
+
+  function SlotMarker(props) {
+    React.useEffect(() => {
+      slots.set(props.id, (slots.get(props.id) || 0) + 1);
+      notifyLayout();
+      return () => { slots.set(props.id, Math.max(0, (slots.get(props.id) || 1) - 1)); notifyLayout(); };
+    }, [props.id]);
+    return null;
+  }
+
+  function ReclaimWrap(props) {
+    const h = React.createElement;
+    const [natural, setNatural] = React.useState(0);
+    const [, tick] = React.useState(0);
+    React.useEffect(() => {
+      const f = () => tick((x) => x + 1);
+      layoutListeners.add(f);
+      return () => { layoutListeners.delete(f); };
+    }, []);
+    const R = reclaimAmount();
+    // Never shrink below one button, and do nothing while Discord has the group collapsed.
+    const width = natural > 0 && R > 0 ? Math.max(natural - R, Math.min(natural, SLOT)) : undefined;
+    status.reclaim = "slots " + slotCount() + ", natural " + natural + "pt, reclaiming " + (width !== undefined ? natural - width : 0) + "pt";
+    const outer = { flexShrink: 0, flexGrow: 0 };
+    if (props.align) outer.alignSelf = props.align;
+    if (width !== undefined) outer.width = width;
+    return h(RN.View, { style: outer },
+      h(RN.View, {
+        onLayout: (e) => { const w = Math.round(e.nativeEvent.layout.width); if (w !== natural) setNatural(w); },
+        style: { flexShrink: 0, alignSelf: "flex-start" },
+      }, props.children));
+  }
+
+  function describeNode(node, depth, out) {
+    if (out.length > 90) return;
+    const pad = "  ".repeat(depth);
+    if (Array.isArray(node)) { node.forEach((c) => describeNode(c, depth, out)); return; }
+    if (!node || typeof node !== "object" || !node.$$typeof) return;
+    const t = typeof node.type === "string" ? node.type : nameOfComponent(node.type) || "?";
+    let st = "";
+    safe(() => {
+      const parts = [];
+      const walk = (x) => {
+        if (!x) return;
+        if (Array.isArray(x)) { x.forEach(walk); return; }
+        if (typeof x !== "object") return;
+        if (x.viewDescriptors || x.initial) { parts.push("ANIM"); return; }
+        for (const k of ["width", "minWidth", "maxWidth", "flex", "flexGrow", "flexShrink", "flexBasis", "margin", "marginLeft", "marginRight", "paddingLeft", "paddingRight", "gap", "position", "left", "right", "alignSelf", "flexDirection"]) {
+          if (x[k] !== undefined) parts.push(k + "=" + x[k]);
+        }
+      };
+      walk(node.props && node.props.style);
+      st = parts.length ? " {" + parts.join(" ") + "}" : "";
+    }, null);
+    const extra = node.props && typeof node.props.layout !== "undefined" ? " layout-anim" : "";
+    out.push(pad + t + st + extra);
+    const kids = node.props && node.props.children;
+    if (kids && depth < 7) describeNode(kids, depth + 1, out);
+  }
+
+  function installReclaim() {
+    const target = resolveTarget("ChatInputActions");
+    if (!target) { status.reclaim = "ChatInputActions not found"; return; }
+    unpatches.push(patcher.after(target[1], target[0], (args, ret) => {
+      if (!ret) return undefined;
+      if (dumpArmed) {
+        dumpArmed = false;
+        const out = [];
+        describeNode(ret, 0, out);
+        status.layout = out.join("\n");
+      }
+      if (cfg().reclaim === false || cfg().hideExtras === false) return undefined;
+      const st = safe(() => RN.StyleSheet.flatten(ret.props && ret.props.style), null);
+      return React.createElement(ReclaimWrap, { align: st && st.alignSelf }, ret);
+    }));
+    status.reclaim = "waiting for the chat bar";
   }
 
   function hideChatButtons() {
@@ -746,8 +848,14 @@
       if (target) {
         unpatches.push(patcher.instead(target[1], target[0], (args, orig) => {
           const props = args[0];
-          if (cfg().hideExtras !== false && props && typeof props === "object" &&
-              Object.keys(props).some((k) => holdsHidden(props[k], 0, hiddenNames()))) return null;
+          if (cfg().hideExtras !== false && props && typeof props === "object") {
+            let found = null;
+            for (const k of Object.keys(props)) {
+              found = heldName(props[k], 0, hiddenNames());
+              if (found) break;
+            }
+            if (found) return React.createElement(SlotMarker, { id: slotId(found) });
+          }
           return orig(...args);
         }));
       }
@@ -815,7 +923,7 @@
         right ? Text({ style: { color: C.sub, fontSize: 15, marginLeft: 8 } }, right) : null);
     const Switch = (key, label, sub) => {
       const value = !!cfg()[key];
-      const change = (v) => { cfg()[key] = v; refreshUI(); notifyButton(); };
+      const change = (v) => { cfg()[key] = v; refreshUI(); notifyButton(); notifyLayout(); };
       return F && F.FormSwitchRow
         ? h(F.FormSwitchRow, { key, label, subLabel: sub, value, onValueChange: change })
         : h(RN.View, { key, style: { flexDirection: "row", alignItems: "center", padding: 16 } },
@@ -885,6 +993,19 @@
           refreshUI();
         }, currentAnchor().label),
         Switch("hideExtras", "Hide Gift and Apps buttons", "Removes them from the chat bar. Restart Discord to apply"),
+        Switch("reclaim", "Expand chat box over hidden buttons", "The chat box takes the space the hidden buttons left. Restart Discord to apply"),
+        PressRow("slots", "Hidden slots to reclaim", "Auto counts the buttons actually hidden. Set 1 or 2 if Auto is wrong", () => {
+          const order = ["auto", 1, 2, 0];
+          const cur = typeof cfg().reclaimSlots === "number" ? cfg().reclaimSlots : "auto";
+          cfg().reclaimSlots = order[(order.indexOf(cur) + 1) % order.length];
+          refreshUI(); notifyLayout();
+        }, typeof cfg().reclaimSlots === "number" ? String(cfg().reclaimSlots) : "Auto"),
+        Btn("dump", "Capture chat bar layout", () => { dumpArmed = true; status.layout = ""; toast("Now tap the chat box, then come back and press Refresh status"); }),
+        status.layout
+          ? h(RN.View, { key: "layout-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
+              Text({ style: { color: C.sub, fontSize: 11 }, selectable: true }, status.layout),
+              Btn("copylayout", "Copy layout", () => copyText(status.layout)))
+          : null,
         Btn("test", "Test translation", () => {
           translate("Hello, how are you?", cfg().targetIn || "en", "auto", false).then((r) => {
             ask("Test translation", r.same ? "Same language, nothing to translate." : r.text + "\n\nDetected: " + langName(r.src), [{ text: "OK" }]);
@@ -893,7 +1014,7 @@
         Section("Status"),
         h(RN.View, { key: "status", style: { paddingHorizontal: 16, paddingVertical: 8 } },
           Text({ style: { color: C.sub, fontSize: 12 }, selectable: true },
-            "Chat bar button: " + status.button + "\nChat box: " + status.input + "\nSend hook: " + status.send + "\nIcon: " + (status.icon || "not drawn yet") + "\nErrors: " + (errors.join("; ") || "none"))),
+            "Chat bar button: " + status.button + "\nChat box: " + status.input + "\nSend hook: " + status.send + "\nIcon: " + (status.icon || "not drawn yet") + "\nReclaim: " + (status.reclaim || "off") + "\nErrors: " + (errors.join("; ") || "none"))),
         Btn("refresh", "Refresh status", refreshUI),
         Btn("icons", "Scan icons", () => { status.icons = scanIcons(); refreshUI(); }),
         Btn("icons2", "Advanced icon scan", () => { status.icons = scanIconsDeep(); refreshUI(); }),
@@ -920,7 +1041,7 @@
     const s = cfg();
     const defaults = {
       targetOut: "en", targetIn: "en", sourceOut: "auto", immersive: true, showButton: true,
-      translateOnSend: false, hideExtras: true, anchor: "gift", favLangs: ["en", "es", "fr", "de", "ro", "ru"],
+      translateOnSend: false, hideExtras: true, reclaim: true, reclaimSlots: "auto", anchor: "gift", favLangs: ["en", "es", "fr", "de", "ro", "ru"],
     };
     for (const k of Object.keys(defaults)) if (s[k] === undefined) s[k] = defaults[k];
     renderErrors = 0;
@@ -933,6 +1054,7 @@
     });
     step("inputCapture", installInputCapture);
     step("sendHook", installSendHook);
+    step("reclaim", installReclaim);
     step("chatButton", attachButton);
     step("hideButtons", hideChatButtons);
   }
@@ -947,6 +1069,9 @@
     bridge.inst = null;
     armed = null;
     lastOriginal = null;
+    slots.clear();
+    layoutListeners.clear();
+    dumpArmed = false;
   }
 
   return { onLoad, onUnload, settings: Settings };
