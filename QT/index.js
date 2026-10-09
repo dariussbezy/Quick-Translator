@@ -117,20 +117,6 @@
   }
 
   function callApi(text, tl, sl) {
-    const key = String(cfg().apiKey || "").trim();
-    if (key) {
-      const body = { q: text, target: tl, format: "text" };
-      if (sl && sl !== "auto") body.source = sl;
-      return fetchT("https://translation.googleapis.com/language/translate/v2?key=" + encodeURIComponent(key), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      }).then((res) => res.json().then((json) => {
-        if (!res.ok) throw new Error((json && json.error && json.error.message) || "HTTP " + res.status);
-        const t = json.data.translations[0];
-        return { text: decodeEntities(t.translatedText), src: t.detectedSourceLanguage || sl };
-      }));
-    }
     const params = "client=gtx&dt=t&sl=" + encodeURIComponent(sl || "auto") + "&tl=" + encodeURIComponent(tl);
     const base = "https://translate.googleapis.com/translate_a/single?" + params;
     const req = text.length < 1200
@@ -421,6 +407,18 @@
     });
   }
 
+  let iconCache;
+  function translateAssetId() {
+    if (iconCache === undefined) {
+      iconCache = safe(() => {
+        const names = Object.keys(ui.assets.all || {});
+        const hit = names.find((n) => /translate/i.test(n)) || names.find((n) => /language|globe/i.test(n));
+        return hit ? ui.assets.getAssetIDByName(hit) : null;
+      }, null);
+    }
+    return iconCache;
+  }
+
   // ---------- message long-press menu ----------
   function findGroups(node, seen, depth, out) {
     if (!node || typeof node !== "object" || depth > 40 || seen.has(node)) return;
@@ -460,7 +458,7 @@
       };
       if (typeof tpl.props.message === "string") props.message = item.label;
       if (typeof tpl.props.label === "string") props.label = item.label;
-      if (nativeIcon !== undefined && tpl.props.icon !== undefined) props.icon = nativeIcon;
+      if (tpl.props.icon !== undefined) props.icon = nativeIcon !== undefined ? nativeIcon : (translateAssetId() || undefined);
       return React.cloneElement(tpl, props);
     });
     last.list.splice(0, 0, ...elements);
@@ -532,16 +530,8 @@
     return null;
   }
 
-  let iconId;
-
   function translateIcon(C) {
-    if (iconId === undefined) {
-      iconId = safe(() => {
-        const names = Object.keys(ui.assets.all || {});
-        const hit = names.find((n) => /translate/i.test(n)) || names.find((n) => /language|globe/i.test(n));
-        return hit ? ui.assets.getAssetIDByName(hit) : null;
-      }, null);
-    }
+    const iconId = translateAssetId();
     if (iconId) return React.createElement(RN.Image, { source: iconId, style: { width: 24, height: 24, tintColor: C.text } });
     return React.createElement(RN.Text, { style: { color: C.text, fontSize: 15, fontWeight: "700" } }, "文A");
   }
@@ -608,11 +598,16 @@
           style: { color: C.text, borderWidth: 1, borderColor: C.line, borderRadius: 8, padding: 10, marginVertical: 8 },
         }),
         h(RN.ScrollView, { key: "list", style: { maxHeight: 320 } },
-          ...list.map(([c, n]) => h(RN.Pressable, {
-            key: c,
-            onPress: () => { if (view === "from") setFrom(c); else setTo(c); setView("main"); },
-            style: { paddingVertical: 11 },
-          }, h(RN.Text, { style: { color: (view === "from" ? from : to) === c ? ACCENT : C.text, fontSize: 16 } }, n)))),
+          ...list.map(function (entry) {
+            const code = entry[0];
+            const label = entry[1];
+            const mode = view;
+            return h(RN.Pressable, {
+              key: code,
+              onPress: function () { if (mode === "from") setFrom(code); else setTo(code); setView("main"); },
+              style: { paddingVertical: 11 },
+            }, h(RN.Text, { style: { color: (mode === "from" ? from : to) === code ? ACCENT : C.text, fontSize: 16 } }, label));
+          })),
       ];
     }
 
@@ -634,6 +629,18 @@
                 style: { backgroundColor: C.bg, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28 },
               }, ...panel)))
         : null);
+  }
+
+  function scanChatComponents() {
+    const found = new Set();
+    safe(() => metro.find((m) => {
+      try {
+        const n = nameOfComponent(m) || (m && m.default && nameOfComponent(m.default));
+        if (n && /^ChatInput/.test(n)) found.add(n);
+      } catch (_) {}
+      return false;
+    }), null);
+    return Array.from(found).sort().join("\n") || "none found";
   }
 
   function attachButton() {
@@ -714,26 +721,31 @@
     if (screen === "targetOut" || screen === "targetIn" || screen === "sourceOut") {
       const isSource = screen === "sourceOut";
       content = [back(), Search()];
-      for (const [c, n] of filtered(isSource ? [["auto", "Auto-detect"]] : [])) {
-        content.push(PressRow(c, n, c === "auto" ? "Detect the language automatically" : c, () => {
-          cfg()[screen] = c;
+      const target = screen;
+      filtered(isSource ? [["auto", "Auto-detect"]] : []).forEach(function (entry) {
+        const code = entry[0];
+        const label = entry[1];
+        content.push(PressRow(code, label, code === "auto" ? "Detect the language automatically" : code, function () {
+          cfg()[target] = code;
           setScreen("main");
           setQuery("");
-        }, cfg()[screen] === c ? "Selected" : ""));
-      }
+        }, cfg()[target] === code ? "Selected" : ""));
+      });
     } else if (screen === "favs") {
       const favs = cfg().favLangs || [];
       content = [back(), Search(),
         Text({ key: "hint", style: { color: C.sub, fontSize: 13, paddingHorizontal: 16 } }, "Pick up to " + MAX_FAVS + ". They appear in the \"Translate to...\" menu and in the chat bar panel.")];
-      for (const [c, n] of filtered()) {
-        const on = favs.indexOf(c) !== -1;
-        content.push(PressRow(c, n, c, () => {
-          if (on) cfg().favLangs = favs.filter((x) => x !== c);
-          else if (favs.length < MAX_FAVS) cfg().favLangs = favs.concat([c]);
+      filtered().forEach(function (entry) {
+        const code = entry[0];
+        const label = entry[1];
+        const on = favs.indexOf(code) !== -1;
+        content.push(PressRow(code, label, code, function () {
+          if (on) cfg().favLangs = favs.filter((x) => x !== code);
+          else if (favs.length < MAX_FAVS) cfg().favLangs = favs.concat([code]);
           else toast("You can pick up to " + MAX_FAVS);
           refreshUI();
         }, on ? "Selected" : ""));
-      }
+      });
     } else {
       content = [
         Section("Languages"),
@@ -746,14 +758,6 @@
         Section("Chat bar"),
         Switch("showButton", "Translate button", "Tap to translate what you typed. Long-press for one-time options"),
         Switch("translateOnSend", "Translate on send", "Translate every message right before it is sent"),
-        Section("Provider"),
-        h(RN.View, { key: "api", style: { paddingHorizontal: 16 } },
-          Text({ style: { color: C.sub, fontSize: 13, marginBottom: 6 } }, "Google Cloud Translation API key (optional). Leave empty to use the free Google Translate endpoint."),
-          h(RN.TextInput, {
-            value: String(cfg().apiKey || ""), onChangeText: (v) => { cfg().apiKey = v; },
-            placeholder: "API key", placeholderTextColor: C.sub, secureTextEntry: true, autoCorrect: false, autoCapitalize: "none",
-            style: { color: C.text, borderWidth: 1, borderColor: C.line, borderRadius: 8, padding: 10 },
-          })),
         Btn("test", "Test translation", () => {
           translate("Hello, how are you?", cfg().targetIn || "en", "auto", false).then((r) => {
             ask("Test translation", r.same ? "Same language, nothing to translate." : r.text + "\n\nDetected: " + langName(r.src), [{ text: "OK" }]);
@@ -764,6 +768,11 @@
           Text({ style: { color: C.sub, fontSize: 12 }, selectable: true },
             "Chat bar button: " + status.button + "\nChat box: " + status.input + "\nSend hook: " + status.send)),
         Btn("refresh", "Refresh status", refreshUI),
+        Btn("scan", "Scan chat bar components", () => { status.scan = scanChatComponents(); refreshUI(); }),
+        status.scan
+          ? h(RN.View, { key: "scan-out", style: { paddingHorizontal: 16, paddingVertical: 8 } },
+              Text({ style: { color: C.sub, fontSize: 12 }, selectable: true }, status.scan))
+          : null,
       ];
     }
     return h(RN.ScrollView, null, ...content);
@@ -773,7 +782,7 @@
     const s = cfg();
     const defaults = {
       targetOut: "en", targetIn: "en", sourceOut: "auto", immersive: true, showButton: true,
-      translateOnSend: false, apiKey: "", favLangs: ["en", "es", "fr", "de", "ro", "ru"],
+      translateOnSend: false, favLangs: ["en", "es", "fr", "de", "ro", "ru"],
     };
     for (const k of Object.keys(defaults)) if (s[k] === undefined) s[k] = defaults[k];
     renderErrors = 0;
