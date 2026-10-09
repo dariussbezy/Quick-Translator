@@ -549,11 +549,12 @@
   function translateIcon(C) {
     const saved = cfg().iconSource;
     const id = (typeof saved === "number" ? saved : null) || translateAssetId();
-    if (id) return React.createElement(RN.Image, { source: id, style: { width: 24, height: 24, tintColor: C.text } });
-    if (capturedIcon && React.isValidElement(capturedIcon)) return capturedIcon;
+    if (id) { status.icon = "asset " + id; return React.createElement(RN.Image, { source: id, style: { width: 24, height: 24, tintColor: C.text } }); }
+    if (capturedIcon && React.isValidElement(capturedIcon)) { status.icon = "copied from Discord menu"; return capturedIcon; }
     const comp = safe(() => (findByProps("TranslateIcon") || {}).TranslateIcon, null);
-    if (comp) { try { return React.createElement(comp, { size: "md" }); } catch (_) {} }
-    return React.createElement(RN.Text, { style: { color: C.text, fontSize: 17, fontWeight: "700", textAlign: "center" } }, "\u6587A");
+    if (comp) { try { const el = React.createElement(comp, { size: "md" }); status.icon = "TranslateIcon component"; return el; } catch (_) {} }
+    status.icon = "emoji fallback (long-press a message to copy Discord's icon)";
+    return React.createElement(RN.Text, { style: { fontSize: 20, textAlign: "center" } }, "\uD83C\uDF10");
   }
 
   function TranslateButton(props) {
@@ -651,7 +652,40 @@
         : null);
   }
 
+  const HIDDEN_BUTTONS = new Set(["ChatInputActionButtonApps", "ChatInputActionButtonGiftOrThread", "ChatInputActionButtonGift"]);
+
+  function holdsHidden(node, depth) {
+    if (!node || typeof node !== "object" || depth > 5) return false;
+    if (Array.isArray(node)) return node.some((c) => holdsHidden(c, depth + 1));
+    if (!node.$$typeof) return false;
+    if (HIDDEN_BUTTONS.has(nameOfComponent(node.type))) return true;
+    const p = node.props;
+    if (!p) return false;
+    return Object.keys(p).some((k) => {
+      const v = p[k];
+      return !!v && typeof v === "object" && holdsHidden(v, depth + 1);
+    });
+  }
+
   function hideChatButtons() {
+    try {
+      const slot = "ChatInputActionButtonTransitionItem";
+      const mod = findComponentModule(slot);
+      if (mod) {
+        const comp = mod.default && nameOfComponent(mod.default) === slot ? mod.default : mod;
+        const target = typeof comp === "function"
+          ? (mod.default === comp ? [mod, "default"] : null)
+          : patchTarget(comp);
+        if (target) {
+          unpatches.push(patcher.instead(target[1], target[0], (args, orig) => {
+            const props = args[0];
+            if (cfg().hideExtras !== false && props && typeof props === "object" &&
+                Object.keys(props).some((k) => holdsHidden(props[k], 0))) return null;
+            return orig(...args);
+          }));
+        }
+      }
+    } catch (_) {}
     const names = ["ChatInputActionButtonApps", "ChatInputActionButtonGiftOrThread", "ChatInputActionButtonGift"];
     for (const name of names) {
       try {
@@ -801,7 +835,7 @@
         Section("Status"),
         h(RN.View, { key: "status", style: { paddingHorizontal: 16, paddingVertical: 8 } },
           Text({ style: { color: C.sub, fontSize: 12 }, selectable: true },
-            "Chat bar button: " + status.button + "\nChat box: " + status.input + "\nSend hook: " + status.send)),
+            "Chat bar button: " + status.button + "\nChat box: " + status.input + "\nSend hook: " + status.send + "\nIcon: " + (status.icon || "not drawn yet"))),
         Btn("refresh", "Refresh status", refreshUI),
         Btn("icons", "Scan icons", () => { status.icons = scanIcons(); refreshUI(); }),
         status.icons
