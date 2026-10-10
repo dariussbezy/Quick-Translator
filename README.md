@@ -4,14 +4,14 @@ A very stable plugin for Kettu that translates messages using Google Translate. 
 
 ## Features
 
-- **Translate your message** with a button in the chat box. Tap it to translate what you typed into your chosen language, or long-press it for one-time options (source language, target language, quick languages, and restore original text).
-- **Translate other people's messages** from the message long-press menu with **Translate to [your language]** or **Translate to...** (pick a language for that message only). Use **Show original message** to switch back.
+- **Translate your message** with a chat button. Tap to translate; long-press for one-time options, language choices, or to restore the original text.
+- **Translate other people's messages** from the long-press menu, with an option to show the original again.
 - **Auto-detect** the source language, with 65 languages to choose from.
-- **Immersive translation** shows the translation below the original message. Turn it off to replace the original text instead.
+- **Immersive translation** shows the translation below the original. Turn it off to replace the original text instead.
 - **Custom translation color** with presets or any HEX color. Existing translated messages update instantly.
-- **Translate on send** can translate every message right before it is sent.
-- **Quick languages** let you pin up to 6 languages for the one-time menus.
-- **Chat bar layout options**: place the button next to the + button or next to the Send button, hide the Gift and Apps buttons, and let the chat box expand over the freed space. The button can also be turned off completely if you only want to translate messages from the long-press menu.
+- **Translate on send** can translate every message before it is sent.
+- **Quick languages** let you pin up to 6 languages for one-time menus.
+- **Chat bar layout options**: place the button next to + or Send, hide Gift and Apps buttons, and expand the chat box over the freed space. The button can also be hidden.
 - Mentions, custom emoji, links, and code blocks are protected and left untranslated.
 - Lightweight: no API key needed, results are cached, and nothing runs in the background.
 
@@ -36,11 +36,10 @@ Please report bugs, crashes, and suggestions in the project's feedback channel.
 
 ## Screenshots:
 
-<img width="1179" height="2403" alt="IMG_0597" src="https://github.com/user-attachments/assets/b9843ec8-32fa-4389-805a-6916027c686c" />
-<img width="1179" height="1406" alt="IMG_0595" src="https://github.com/user-attachments/assets/da58c464-dfef-4b11-a6f2-ec7056a9505d" />
-<img width="1179" height="2401" alt="IMG_0594" src="https://github.com/user-attachments/assets/b1811dad-907f-4d34-8872-8d4fa26621bf" />
-<img width="1179" height="2416" alt="IMG_0593" src="https://github.com/user-attachments/assets/44a19bd0-90ef-4604-9f4e-abbcdc8a36b1" />
-<img width="1179" height="505" alt="IMG_0592" src="https://github.com/user-attachments/assets/cf5a5697-783b-4d97-be7a-7b3ddfc45eb3" />
-<img width="1179" height="284" alt="IMG_0596" src="https://github.com/user-attachments/assets/ac0efa5e-4831-4c73-be29-c2c8307bfd48" />
-<img width="1179" height="245" alt="IMG_0599" src="https://github.com/user-attachments/assets/0397bff6-bff8-4305-8591-be66019ec1e9" />
-
+<img width="1179" height="499" alt="image" src="https://github.com/user-attachments/assets/535dfa26-c28f-4218-a1bf-620866c53963" />
+<img width="1179" height="2404" alt="image" src="https://github.com/user-attachments/assets/ea688924-861f-41ca-85d6-640cfa46db4f" />
+<img width="1179" height="2404" alt="image" src="https://github.com/user-attachments/assets/d09f45da-b19e-4604-9372-4f2ebd297bcc" />
+<img width="1179" height="360" alt="image" src="https://github.com/user-attachments/assets/ccf17b60-8742-4c3e-bfb1-fe5f39af7cc4" />
+<img width="1179" height="1260" alt="image" src="https://github.com/user-attachments/assets/0ae6eee6-ba3e-4d36-a5ad-3021ef781106" />
+<img width="1179" height="2408" alt="image" src="https://github.com/user-attachments/assets/167ecda8-62eb-4cc9-a164-e54cef1c56f5" />
+<img width="1179" height="1288" alt="image" src="https://github.com/user-attachments/assets/334a9616-3e54-43de-a545-499b10e40f7d" />
