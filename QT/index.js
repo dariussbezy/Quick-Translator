@@ -119,7 +119,7 @@
       if (!HEX.test(hex)) { setError("Enter a HEX color such as #3366FF."); return; }
       finish(hex);
     };
-    return h(RN.ScrollView, { style: { width: "100%", maxWidth: 440, maxHeight: "90%", alignSelf: "center", padding: 22, borderRadius: 22, backgroundColor: C.bg } },
+    return h(RN.ScrollView, { style: { width: "92%", maxWidth: 440, maxHeight: "90%", alignSelf: "center", padding: 18, borderRadius: 22, backgroundColor: C.bg } },
       h(RN.Text, { style: { color: C.text, fontSize: 20, fontWeight: "700", marginBottom: 8 } }, "Translation color"),
       h(RN.Text, { style: { color: C.sub, fontSize: 14, marginBottom: 12 } }, "Choose a preset or enter a HEX color."),
       h(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", marginBottom: 12 } }, COLOR_PRESETS.map(([label, hex]) =>
@@ -740,8 +740,8 @@
   }
 
   const ANCHORS = [
-    { id: "actions", label: "Next to the + button", name: "ChatInputActions", mode: "append" },
-    { id: "send", label: "Next to the Send button", name: "ChatInputSendButton", mode: "beside" },
+    { id: "actions", label: "+ button", name: "ChatInputActions", mode: "append" },
+    { id: "send", label: "Send", name: "ChatInputSendButton", mode: "beside" },
   ];
   const currentAnchor = () => ANCHORS.find((a) => a.id === cfg().anchor) || ANCHORS[0];
   const hiddenNames = () => {
@@ -833,6 +833,16 @@
   function Settings() {
     vstorage.useProxy(plugin.storage);
     const [screen, setScreen] = React.useState("main");
+    const AnimatedScrollView = RN.Animated && RN.Animated.ScrollView;
+    const screenFade = React.useRef(AnimatedScrollView ? new RN.Animated.Value(1) : null).current;
+    React.useEffect(() => {
+      if (!screenFade || !RN.Animated || typeof RN.Animated.timing !== "function") return;
+      screenFade.setValue(0);
+      const animation = RN.Animated.timing(screenFade, { toValue: 1, duration: 110, useNativeDriver: true });
+      animation.start();
+      return () => animation.stop();
+    }, [screen]);
+    const screenStyle = screenFade ? { opacity: screenFade, transform: [{ translateY: screenFade.interpolate({ inputRange: [0, 1], outputRange: [3, 0] }) }] } : undefined;
     const [query, setQuery] = React.useState("");
     const [, bump] = React.useState(0);
     const refreshUI = () => bump((x) => x + 1);
@@ -1011,7 +1021,7 @@
       ];
     }
     content.unshift(screen === "main" ? Header("Quick Translate", "Translate messages with Google Translate") : buildTag());
-    return h(RN.ScrollView, { key: screen, contentContainerStyle: { paddingBottom: 40 } }, ...compose(content));
+    return h(AnimatedScrollView || RN.ScrollView, { key: screen, style: screenStyle, contentContainerStyle: { paddingBottom: 40 } }, ...compose(content));
   }
 
   const step = (fn) => { try { fn(); } catch (_) {} };
