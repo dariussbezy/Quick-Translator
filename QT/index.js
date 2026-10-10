@@ -5,7 +5,8 @@
   const { findByProps, findByStoreName } = metro;
   const { FluxDispatcher, React, ReactNative: RN } = metro.common;
 
-  const BUILD = "v1.0.0";
+  const BUILD = "v1.1.0";
+  const RESTART_MSG = "Restart Discord to apply this change";
   const FLAG_TOGGLE = 0x04000000;
   const ACCENT = "#8EA1FF";
   const MAX_TRANSLATIONS = 300;
@@ -88,6 +89,10 @@
   }
 
   const HEX = /^#[0-9A-Fa-f]{6}$/;
+  const COLOR_PRESETS = [
+    ["Default", ACCENT], ["Red", "#ED4245"], ["Orange", "#F07B3E"], ["Gold", "#F1C40F"], ["Green", "#43B581"],
+    ["Teal", "#1ABC9C"], ["Blue", "#3498DB"], ["Indigo", "#5865F2"], ["Purple", "#9B59B6"], ["Pink", "#EB459E"], ["Gray", "#80848E"],
+  ];
   const translationColor = () => (HEX.test(String(cfg().translationColor || "")) ? String(cfg().translationColor).toUpperCase() : ACCENT);
 
   function closeAlert() {
@@ -102,10 +107,6 @@
     const [value, setValue] = React.useState(String(props.initialValue || ACCENT));
     const [error, setError] = React.useState("");
     const C = palette();
-    const presets = [
-      ["Default", ACCENT], ["Red", "#ED4245"], ["Orange", "#F07B3E"], ["Gold", "#F1C40F"], ["Green", "#43B581"],
-      ["Teal", "#1ABC9C"], ["Blue", "#3498DB"], ["Indigo", "#5865F2"], ["Purple", "#9B59B6"], ["Pink", "#EB459E"], ["Gray", "#80848E"],
-    ];
     const action = (label, onPress, primary) =>
       h(RN.Pressable, {
         key: label, onPress,
@@ -120,7 +121,7 @@
     return h(RN.ScrollView, { style: { width: "100%", maxWidth: 440, maxHeight: "90%", alignSelf: "center", padding: 20, borderRadius: 14, backgroundColor: C.bg } },
       h(RN.Text, { style: { color: C.text, fontSize: 20, fontWeight: "700", marginBottom: 8 } }, "Translation color"),
       h(RN.Text, { style: { color: C.sub, fontSize: 14, marginBottom: 12 } }, "Choose a preset or enter a HEX color."),
-      h(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", marginBottom: 12 } }, presets.map(([label, hex]) =>
+      h(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", marginBottom: 12 } }, COLOR_PRESETS.map(([label, hex]) =>
         h(RN.Pressable, { key: hex, onPress: () => { setValue(hex); setError(""); }, style: { width: 62, alignItems: "center", marginRight: 6, marginBottom: 8 } },
           h(RN.View, { style: { width: 34, height: 34, borderRadius: 17, backgroundColor: hex, borderWidth: value.toUpperCase() === hex ? 3 : 1, borderColor: C.text } }),
           h(RN.Text, { style: { color: C.text, fontSize: 11, marginTop: 3 } }, label)))),
@@ -151,10 +152,12 @@
 
   // ---------- translation ----------
   function fetchT(url, opts) {
+    let timer;
+    const clear = () => clearTimeout(timer);
     return Promise.race([
       fetch(url, opts),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out")), TIMEOUT)),
-    ]);
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Timed out")), TIMEOUT); }),
+    ]).then((res) => { clear(); return res; }, (err) => { clear(); throw err; });
   }
 
   function callApi(text, tl, sl) {
@@ -324,8 +327,7 @@
           const msg = args[1];
           const job = armed;
           if ((job || cfg().translateOnSend) && msg && typeof msg.content === "string" && msg.content.trim()) {
-            armed = null;
-            notifyButton();
+            if (job && !cfg().keepArmed) { armed = null; notifyButton(); }
             pending = translate(msg.content, job ? job.tl : cfg().targetOut, job ? job.sl : cfg().sourceOut, false).then((r) => {
               if (!r.same) args[1] = Object.assign({}, msg, { content: r.text });
             });
@@ -598,7 +600,7 @@
     for (const key of keys) {
       const comp = safe(() => (findByProps(key) || {})[key], null);
       if (comp) {
-        try { const el = React.createElement(comp, { size: "md" }); return el; } catch (_) {}
+        try { return React.createElement(comp, { size: "md" }); } catch (_) {}
       }
     }
     return null;
@@ -705,7 +707,13 @@
     return h(RN.View, { style: wrapperStyle },
       h(RN.Pressable, {
         onPress: () => {
-          if (armed) { armed = null; notifyButton(); toast("Translation cancelled"); return; }
+          if (armed) { armed = null; notifyButton(); toast("Translation turned off"); return; }
+          if (cfg().keepArmed) {
+            armed = { tl: cfg().targetOut || "en", sl: cfg().sourceOut || "auto" };
+            notifyButton();
+            toast("Your messages will be translated until you turn this off");
+            return;
+          }
           run(cfg().targetOut || "en", cfg().sourceOut || "auto");
         },
         onLongPress: openPanel,
@@ -784,7 +792,6 @@
         unpatches.push(patcher.instead(target[1], target[0], (args, orig) => {
           const props = args[0];
           if (cfg().hideExtras !== false && props && typeof props === "object") {
-            const names = hiddenNames();
             if (Object.keys(props).some((k) => holdsHidden(props[k], 0, names))) return null;
           }
           return orig(...args);
@@ -835,9 +842,9 @@
           Text({ style: { color: C.text, fontSize: 16 } }, label),
           sub ? Text({ style: { color: C.sub, fontSize: 13, marginTop: 2 } }, sub) : null),
         right ? Text({ style: { color: rightColor || C.sub, fontSize: 15, marginLeft: 8 } }, right) : null);
-    const Switch = (key, label, sub) => {
+    const Switch = (key, label, sub, restart) => {
       const value = !!cfg()[key];
-      const change = (v) => { cfg()[key] = v; refreshUI(); notifyButton(); };
+      const change = (v) => { cfg()[key] = v; refreshUI(); notifyButton(); if (restart) toast(RESTART_MSG); };
       return F && F.FormSwitchRow
         ? h(F.FormSwitchRow, { key, label, subLabel: sub, value, onValueChange: change })
         : h(RN.View, { key, style: { flexDirection: "row", alignItems: "center", padding: 16 } },
@@ -909,13 +916,15 @@
         Section("Chat bar"),
         Switch("showButton", "Show translate button in chat box", "Turn off to only translate messages from their long-press menu"),
         Switch("translateOnSend", "Translate on send", "Translate every message right before it is sent"),
+        Switch("keepArmed", "Keep translate button active", "Tapping the button turns translation on until you tap it again. Off: it turns off after each message"),
         PressRow("anchor", "Button position", "Tap to change, then restart Discord", () => {
           const i = ANCHORS.findIndex((x) => x.id === currentAnchor().id);
           cfg().anchor = ANCHORS[(i + 1) % ANCHORS.length].id;
           refreshUI();
+          toast(RESTART_MSG);
         }, currentAnchor().label),
-        Switch("hideExtras", "Hide Gift and Apps buttons", "Removes them from the chat bar. Restart Discord to apply"),
-        Switch("reclaim", "Expand chat box over hidden buttons", "The chat box takes the space the hidden buttons left. Restart Discord to apply"),
+        Switch("hideExtras", "Hide Gift and Apps buttons", "Removes them from the chat bar. Restart Discord to apply", true),
+        Switch("reclaim", "Expand chat box over hidden buttons", "The chat box takes the space the hidden buttons left. Restart Discord to apply", true),
       ];
     }
     content.unshift(h(RN.View, { key: "build", style: { paddingHorizontal: 16, paddingTop: 8 } },
@@ -929,7 +938,7 @@
     const s = cfg();
     const defaults = {
       targetOut: "en", targetIn: "en", sourceOut: "auto", immersive: true, translationColor: ACCENT, showButton: true,
-      translateOnSend: false, hideExtras: true, reclaim: true, anchor: "actions", favLangs: ["en", "es", "fr", "de", "ro", "ru"],
+      translateOnSend: false, keepArmed: false, hideExtras: true, reclaim: true, anchor: "actions", favLangs: ["en", "es", "fr", "de", "ro", "ru"],
     };
     for (const k of Object.keys(defaults)) if (s[k] === undefined) s[k] = defaults[k];
     if (!ANCHORS.some((a) => a.id === s.anchor)) s.anchor = "actions";
