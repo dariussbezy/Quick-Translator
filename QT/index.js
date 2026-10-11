@@ -969,17 +969,21 @@
       return marker;
     };
 
-    const valueChip = (right, rightColor) => {
+    const valueChip = (right) => {
       if (!right) return null;
-      if (right === ">" || right === "\u203A") return Text({ style: { color: C.sub, fontSize: 24, marginLeft: 8 } }, "\u203A");
-      if (right === "Selected") return Text({ style: { color: C.acc, fontSize: 20, fontWeight: "700", marginLeft: 8 } }, "\u2713");
+      if (right === ">" || right === "\u203A") {
+        return F.TableRow && F.TableRow.Arrow ? F.TableRow.Arrow : Text({ style: { color: C.sub, fontSize: 22, marginLeft: 8 } }, "\u203A");
+      }
+      const trailingText = (text) => F.TableRow && F.TableRow.TrailingText
+        ? h(F.TableRow.TrailingText, { text })
+        : Text({ style: { color: C.sub, fontSize: 14, marginLeft: 8 }, numberOfLines: 1 }, text);
+      if (right === "Selected") return trailingText("Selected");
       if (HEXCOLOR.test(right)) {
         return h(RN.View, { style: { flexDirection: "row", alignItems: "center", marginLeft: 8 } },
-          h(RN.View, { style: { width: 22, height: 22, borderRadius: 11, backgroundColor: right, borderWidth: 2, borderColor: C.divider } }),
-          Text({ style: { color: C.sub, fontSize: 13, marginLeft: 8 } }, right));
+          h(RN.View, { style: { width: 20, height: 20, borderRadius: 10, backgroundColor: right, borderWidth: 1, borderColor: C.divider } }),
+          trailingText(right));
       }
-      return h(RN.View, { style: { marginLeft: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 18, backgroundColor: C.chip, maxWidth: 160, minWidth: 52, alignItems: "center" } },
-        Text({ style: { color: rightColor || C.text, fontSize: 14, fontWeight: "600", textAlign: "center" }, numberOfLines: 1 }, right));
+      return trailingText(String(right));
     };
 
     const PressRow = (key, label, sub, onPress, right, rightColor) => mark(
