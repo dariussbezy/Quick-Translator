@@ -136,11 +136,67 @@
         action("Default", () => finish(ACCENT), false), action("Cancel", closeAlert, false), action("Save", save, true)));
   }
 
+  function openNativeColorAlert(props) {
+    const api = findByProps("openAlert", "dismissAlert");
+    if (!api || typeof api.openAlert !== "function") throw new Error("Discord alert API unavailable");
+    api.openAlert("qt-color-setting", React.createElement(NativeColorAlert, props));
+  }
+
+  function NativeColorAlert(props) {
+    const [value, setValue] = React.useState(String(props.initialValue || ACCENT));
+    const [error, setError] = React.useState("");
+    const h = React.createElement;
+    const alerts = findByProps("openAlert", "dismissAlert");
+    const alertParts = findByProps("AlertModal", "AlertActions", "AlertActionButton");
+    const groupModule = findByProps("TableRowGroup");
+    const rowModule = findByProps("TableRow");
+    const inputModule = findByProps("TextInput");
+    const Group = groupModule && groupModule.TableRowGroup;
+    const Row = rowModule && rowModule.TableRow;
+    const Input = inputModule && inputModule.TextInput;
+    if (!alertParts || !Group || !Row) return h(RN.Text, null, "Color settings are unavailable.");
+    const dismiss = () => { try { alerts.dismissAlert("qt-color-setting"); } catch (_) {} };
+    const save = (hex) => { props.onSave(hex); dismiss(); };
+    const presets = COLOR_PRESETS.map(([label, hex]) => h(Row, {
+      key: hex, label, onPress: () => setValue(hex),
+      icon: h(RN.View, { style: { width: 20, height: 20, borderRadius: 10, backgroundColor: hex } }),
+      trailing: value.toUpperCase() === hex && Row.TrailingText ? h(Row.TrailingText, { text: "Selected" }) : undefined,
+    }));
+    const extraContent = h(RN.ScrollView, { style: { maxHeight: 420 } },
+      h(Group, { title: "Basic colors" }, ...presets),
+      h(Group, { title: "Custom HEX" },
+        Input ? h(Input, { value, onChange: (next) => { setValue(next); setError(""); }, placeholder: "#3366FF", autoCapitalize: "characters", autoCorrect: false })
+          : h(RN.TextInput, { value, onChangeText: (next) => { setValue(next); setError(""); }, placeholder: "#3366FF", autoCapitalize: "characters", autoCorrect: false }),
+        error ? h(RN.Text, { style: { color: "#ED4245", padding: 8 } }, error) : null));
+    const actions = h(alertParts.AlertActions, null,
+      h(alertParts.AlertActionButton, { text: "Default", variant: "secondary", onPress: () => save(ACCENT) }),
+      h(alertParts.AlertActionButton, { text: "Cancel", variant: "secondary", onPress: dismiss }),
+      h(alertParts.AlertActionButton, { text: "Save", variant: "primary", disabled: !/^#[0-9A-Fa-f]{6}$/.test(value), onPress: () => {
+        const hex = String(value).trim().toUpperCase();
+        if (!HEX.test(hex)) { setError("Enter a HEX color such as #3366FF."); return; }
+        save(hex);
+      } }));
+    return h(alertParts.AlertModal, { title: "Translation color", content: "Choose a preset or enter a HEX color.", extraContent, actions });
+  }
+
   function ask(title, message, buttons) {
     const ios = RN.Platform && RN.Platform.OS === "ios";
     const list = buttons.slice(0, ios ? 6 : 3);
     if (ios) list.push({ text: "Cancel", style: "cancel" });
-    try { RN.Alert.alert(title, message, list, { cancelable: true }); } catch (_) {}
+    try { showDiscordAlert("qt-info", title, message, list); } catch (_) {}
+  }
+
+  function showDiscordAlert(id, title, content, buttons) {
+    const h = React.createElement;
+    const alerts = findByProps("openAlert", "dismissAlert");
+    const components = findByProps("AlertModal", "AlertActions", "AlertActionButton");
+    if (!alerts || !components) throw new Error("Discord alert components unavailable");
+    const actions = h(components.AlertActions, null, ...buttons.slice(0, 4).map((button, index) => h(components.AlertActionButton, {
+      key: id + "-action-" + index, text: button.text,
+      variant: button.style === "destructive" ? "destructive" : button.style === "cancel" ? "secondary" : "primary",
+      onPress: button.onPress,
+    })));
+    alerts.openAlert(id, h(components.AlertModal, { title, content, actions }));
   }
 
   function copyText(text) {
@@ -958,7 +1014,7 @@
 
     const Title = (key, text) => Text({ key, style: { color: C.text, fontSize: 20, fontWeight: "700", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6 } }, text);
 
-    // Rows that sit next to each other are grouped into one rounded card with dividers.
+    // Render settings groups with Kettu's native table row components.
     const compose = (list) => {
       const out = [];
       let run = [];
@@ -972,7 +1028,6 @@
           title = null;
           return;
         }
-        if (title) out.push(sectionHeader(title));
         const sectionRows = [];
         run.forEach((row, index) => {
           if (index) sectionRows.push(F.FormDivider
@@ -1017,25 +1072,6 @@
     const back = () => Btn("back", "< Back", () => { setScreen("main"); setQuery(""); });
 
     const saveTranslationColor = (hex) => { cfg().translationColor = hex; refreshUI(); refreshTranslated(); };
-    const chooseTranslationColor = (offset) => {
-      const choices = COLOR_PRESETS.slice(offset, offset + 4).map(([label, hex]) => ({ text: label, onPress: () => saveTranslationColor(hex) }));
-      if (offset + 4 < COLOR_PRESETS.length) choices.push({ text: "More colors", onPress: () => chooseTranslationColor(offset + 4) });
-      choices.push({ text: "Custom HEX", onPress: () => {
-        if (!RN.Alert || typeof RN.Alert.prompt !== "function") {
-          try { ui.alerts.showCustomAlert(ColorModal, { initialValue: translationColor(), onSave: saveTranslationColor }); } catch (_) { toast("Custom color entry is unavailable"); }
-          return;
-        }
-        RN.Alert.prompt("Translation color", "Enter a HEX color such as #3366FF", (value) => {
-          const hex = String(value || "").trim().toUpperCase();
-          if (/^#[0-9A-F]{6}$/.test(hex)) saveTranslationColor(hex);
-          else if (value != null) ask("Invalid color", "Use a HEX color such as #3366FF.", [{ text: "OK" }]);
-        }, "plain-text", translationColor());
-      } });
-      choices.push({ text: "Default", onPress: () => saveTranslationColor(ACCENT) });
-      choices.push({ text: "Cancel", style: "cancel" });
-      RN.Alert.alert("Translation color", "Current: " + translationColor(), choices, { cancelable: true });
-    };
-
     let content;
     if (screen === "targetOut" || screen === "targetIn" || screen === "sourceOut") {
       const isSource = screen === "sourceOut";
@@ -1075,8 +1111,7 @@
         Section("Display"),
         Switch("immersive", "Immersive translation", "Show the translation below the original message. Off replaces the original text"),
         PressRow("color", "Translation color", "Color of the translated text in messages", () => {
-          if (RN.Platform && RN.Platform.OS === "ios" && RN.Alert && typeof RN.Alert.alert === "function") chooseTranslationColor(0);
-          else try { ui.alerts.showCustomAlert(ColorModal, { initialValue: translationColor(), onSave: saveTranslationColor }); }
+          try { openNativeColorAlert({ initialValue: translationColor(), onSave: saveTranslationColor }); }
           catch (_) { toast("Could not open color settings"); }
         }, translationColor(), translationColor()),
         Section("Chat bar"),
@@ -1093,7 +1128,8 @@
         Switch("reclaim", "Expand chat box over hidden buttons", "The chat box takes the space the hidden buttons left. Restart Discord to apply", true),
       ];
     }
-    return h(RN.ScrollView, { key: screen, contentContainerStyle: { paddingBottom: 24 } }, ...compose(content));
+    const buildLabel = Text({ key: "build", style: { color: C.sub, fontSize: 13, paddingHorizontal: 4, paddingBottom: 4 } }, "Build " + BUILD);
+    return h(RN.ScrollView, { key: screen, contentContainerStyle: { paddingHorizontal: 12, paddingTop: 20, paddingBottom: 24 } }, buildLabel, ...compose(content));
   }
 
   const step = (fn) => { try { fn(); } catch (_) {} };
