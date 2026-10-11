@@ -863,6 +863,33 @@
       FormRow: settingsFormComponent("FormRow"),
       FormSwitchRow: settingsFormComponent("FormSwitchRow"),
       FormDivider: settingsFormComponent("FormDivider"),
+      FormInput: settingsFormComponent("FormInput"),
+    };
+    const nativeIconCache = new Map();
+    const settingIcon = (key, label) => {
+      const Icon = F.FormRow && F.FormRow.Icon;
+      if (!Icon || !ui.assets || typeof ui.assets.getAssetIDByName !== "function") return undefined;
+      const cacheKey = String(key || "") + " " + String(label || "");
+      if (nativeIconCache.has(cacheKey)) return nativeIconCache.get(cacheKey);
+      const text = cacheKey.toLowerCase();
+      const patterns = /translate|language|locale|target|source/.test(text) ? [/language/i, /translate/i, /globe/i, /locale/i]
+        : /color/.test(text) ? [/paint_brush/i, /color/i, /palette/i]
+        : /button|chat|anchor/.test(text) ? [/chat/i, /button/i, /message/i]
+        : /hide|gift|app/.test(text) ? [/gift/i, /app/i, /hide/i]
+        : /search|filter/.test(text) ? [/search/i, /filter/i]
+        : [/settings/i];
+      let icon = null;
+      try {
+        const names = Object.keys(ui.assets.all || {});
+        let name = null;
+        for (const pattern of patterns) { name = names.find((candidate) => pattern.test(candidate)); if (name) break; }
+        if (name) {
+          const source = ui.assets.getAssetIDByName(name);
+          if (source != null) icon = h(Icon, { source });
+        }
+      } catch (_) {}
+      nativeIconCache.set(cacheKey, icon || undefined);
+      return icon || undefined;
     };
 
     const RED = "#ED4245";
@@ -897,13 +924,13 @@
 
     const PressRow = (key, label, sub, onPress, right, rightColor) => mark(
       F && F.FormRow
-        ? h(F.FormRow, { key, label, subLabel: sub, onPress, trailing: valueChip(right, rightColor) })
+        ? h(F.FormRow, { key, label, subLabel: sub, onPress, leading: settingIcon(key, label), trailing: valueChip(right, rightColor) })
         : h(RN.Pressable, { key, onPress, accessibilityRole: "button", style: rowStyle },
           rowText(label, sub), valueChip(right, rightColor)));
 
     const switchRow = (key, label, sub, value, change) => mark(
       F && F.FormSwitchRow
-        ? h(F.FormSwitchRow, { key, label, subLabel: sub, value, onValueChange: change })
+        ? h(F.FormSwitchRow, { key, label, subLabel: sub, leading: settingIcon(key, label), value, onValueChange: change })
         : h(RN.Pressable, { key, onPress: () => change(!value), accessibilityRole: "button", style: rowStyle },
           h(RN.View, { style: { flex: 1, paddingRight: 12 } },
             Text({ style: { color: C.text, fontSize: 16, fontWeight: "500" } }, label),
@@ -912,7 +939,7 @@
 
     const Btn = (key, title, onPress, color) => {
       const label = key === "back" ? "‹  Back" : title;
-      if (F.FormRow) return mark(h(F.FormRow, { key, label, onPress }));
+      if (F.FormRow) return mark(h(F.FormRow, { key, label, leading: settingIcon(key, label), onPress }));
       return mark(h(RN.Pressable, { key, onPress, accessibilityRole: "button", style: rowStyle }, rowText(label, null)));
     };
 
@@ -965,12 +992,13 @@
       const change = (v) => { cfg()[key] = v; refreshUI(); notifyButton(); if (restart) toast(RESTART_MSG); };
       return switchRow(key, label, sub, value, change);
     };
-    const Search = () =>
-      h(RN.TextInput, {
-        key: "search", value: query, onChangeText: setQuery, placeholder: "Search languages", placeholderTextColor: C.sub,
-        autoCorrect: false, autoCapitalize: "none",
-        style: { color: C.text, backgroundColor: C.card2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, marginHorizontal: 16, marginTop: 10, marginBottom: 6 },
-      });
+    const Search = () => F.FormInput
+      ? mark(h(F.FormInput, { key: "search", title: "SEARCH LANGUAGES", value: query, onChange: (value) => setQuery(typeof value === "string" ? value : value && typeof value.text === "string" ? value.text : ""), placeholder: "Type a language name or code" }))
+      : h(RN.TextInput, {
+          key: "search", value: query, onChangeText: setQuery, placeholder: "Search languages", placeholderTextColor: C.sub,
+          autoCorrect: false, autoCapitalize: "none",
+          style: { color: C.text, backgroundColor: C.card2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, marginHorizontal: 16, marginTop: 10, marginBottom: 6 },
+        });
     const filtered = (extra) => {
       const q = query.trim().toLowerCase();
       return (extra || []).concat(LANGS).filter(([c, n]) => !q || n.toLowerCase().indexOf(q) !== -1 || c.toLowerCase().indexOf(q) !== -1);
@@ -1000,7 +1028,7 @@
     let content;
     if (screen === "targetOut" || screen === "targetIn" || screen === "sourceOut") {
       const isSource = screen === "sourceOut";
-      content = [back(), Search()];
+      content = [back(), Section("Languages"), Search()];
       const target = screen;
       filtered(isSource ? [["auto", "Auto-detect"]] : []).forEach(function (entry) {
         const code = entry[0];
@@ -1013,7 +1041,7 @@
       });
     } else if (screen === "favs") {
       const favs = cfg().favLangs || [];
-      content = [back(), Search(),
+      content = [back(), Section("Quick languages"), Search(),
         Text({ key: "hint", style: { color: C.sub, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, paddingTop: 6, paddingBottom: 6 } }, "Pick up to " + MAX_FAVS + ". They appear in the \"Translate to...\" menu and in the chat bar panel.")];
       filtered().forEach(function (entry) {
         const code = entry[0];
