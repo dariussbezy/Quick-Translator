@@ -859,6 +859,9 @@
     const C = palette();
     const h = React.createElement;
     const F = {
+      TableRowGroup: settingsFormComponent("TableRowGroup"),
+      TableRow: settingsFormComponent("TableRow"),
+      TableSwitchRow: settingsFormComponent("TableSwitchRow"),
       FormSection: settingsFormComponent("FormSection"),
       FormRow: settingsFormComponent("FormRow"),
       FormSwitchRow: settingsFormComponent("FormSwitchRow"),
@@ -868,7 +871,7 @@
     };
     const nativeIconCache = new Map();
     const settingIcon = (key, label) => {
-      const Icon = F.FormRow && F.FormRow.Icon;
+      const Icon = (F.TableRow && F.TableRow.Icon) || (F.FormRow && F.FormRow.Icon);
       if (!Icon || !ui.assets || typeof ui.assets.getAssetIDByName !== "function") return undefined;
       const cacheKey = String(key || "") + " " + String(label || "");
       if (nativeIconCache.has(cacheKey)) return nativeIconCache.get(cacheKey);
@@ -924,13 +927,17 @@
     };
 
     const PressRow = (key, label, sub, onPress, right, rightColor) => mark(
-      F && F.FormRow
+      F && F.TableRow
+        ? h(F.TableRow, { key, label, subLabel: sub, onPress, icon: settingIcon(key, label), trailing: valueChip(right, rightColor) })
+        : F && F.FormRow
         ? h(F.FormRow, { key, label, subLabel: sub, onPress, leading: settingIcon(key, label), trailing: valueChip(right, rightColor) })
         : h(RN.Pressable, { key, onPress, accessibilityRole: "button", style: rowStyle },
           rowText(label, sub), valueChip(right, rightColor)));
 
     const switchRow = (key, label, sub, value, change) => mark(
-      F && F.FormSwitch && F.FormRow
+      F && F.TableSwitchRow
+        ? h(F.TableSwitchRow, { key, label, subLabel: sub, icon: settingIcon(key, label), value, onValueChange: change })
+        : F && F.FormSwitch && F.FormRow
         ? h(F.FormRow, { key, label, subLabel: sub, leading: settingIcon(key, label), trailing: h(F.FormSwitch, { value, onValueChange: change }) })
         : F && F.FormSwitchRow
         ? h(F.FormSwitchRow, { key, label, subLabel: sub, leading: settingIcon(key, label), value, onValueChange: change })
@@ -942,6 +949,7 @@
 
     const Btn = (key, title, onPress, color) => {
       const label = key === "back" ? "‹  Back" : title;
+      if (F.TableRow) return mark(h(F.TableRow, { key, label, icon: settingIcon(key, label), onPress }));
       if (F.FormRow) return mark(h(F.FormRow, { key, label, leading: settingIcon(key, label), onPress }));
       return mark(h(RN.Pressable, { key, onPress, accessibilityRole: "button", style: rowStyle }, rowText(label, null)));
     };
@@ -972,7 +980,8 @@
             : h(RN.View, { key: "row-divider-" + groupIndex++, style: { height: 1, marginLeft: 28, backgroundColor: C.divider } }));
           sectionRows.push(row);
         });
-        if (title && F.FormSection) out.push(h(F.FormSection, { key: "settings-section-" + groupIndex++, title }, ...sectionRows));
+        if (title && F.TableRowGroup) out.push(h(F.TableRowGroup, { key: "settings-section-" + groupIndex++, title }, ...run));
+        else if (title && F.FormSection) out.push(h(F.FormSection, { key: "settings-section-" + groupIndex++, title }, ...sectionRows));
         else {
           if (title) out.push(sectionHeader(title));
           out.push(...sectionRows);
