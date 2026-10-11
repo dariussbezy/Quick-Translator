@@ -859,6 +859,7 @@
     const C = palette();
     const h = React.createElement;
     const F = {
+      FormCardSection: settingsFormComponent("FormCardSection"),
       FormRow: settingsFormComponent("FormRow"),
       FormSwitchRow: settingsFormComponent("FormSwitchRow"),
       FormSwitch: settingsFormComponent("FormSwitch"),
@@ -971,7 +972,8 @@
             : h(RN.View, { key: "row-divider-" + groupIndex++, style: { height: 1, marginLeft: 28, backgroundColor: C.divider } }));
           cardRows.push(row);
         });
-        out.push(...cardRows);
+        if (F.FormCardSection) out.push(h(F.FormCardSection, { key: "settings-card-" + groupIndex++ }, ...cardRows));
+        else out.push(...cardRows);
         run = [];
         title = null;
       };
