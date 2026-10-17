@@ -1,4 +1,6 @@
-# Quick Translate
+# THIS PLUGIN FOR KETTU IS NO LONGER MAINTAINED, MOVE ON TO RAIN AND CHOOSE THIS VERSION: https://github.com/dariussbezy/Quick-Translate
+
+# Quick Translator Kettu
 
 A very stable plugin for Kettu that translates messages using Google Translate. Translate what you type before sending it, or translate messages from others straight from their long-press menu.
 
