@@ -22,7 +22,7 @@ A very stable plugin for Kettu that translates messages using Google Translate. 
 In Kettu, go to **Settings → Plugins**, tap **+**, and paste:
 
 ```text
-https://raw.githubusercontent.com/dariussbezy/Quick-Translator/main/QT/
+https://raw.githubusercontent.com/dariussbezy/Quick-Translator-Kettu/main/QTK/
 ```
 
 Enable the plugin, then open its settings to choose your languages, colors, and chat bar options.
